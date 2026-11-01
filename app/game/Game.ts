@@ -46,6 +46,8 @@ export class Game {
   private readonly resizeObserver: ResizeObserver
   private readonly aim = new THREE.Vector3()
   private readonly feet = new THREE.Vector3()
+  private readonly aimHead = new THREE.Vector3()
+  private readonly aimPoint = new THREE.Vector3()
 
   private piece: PieceType | null = 'wall'
   private turboCooldown = 0
@@ -164,18 +166,7 @@ export class Game {
 
   private updateBuilding({ pressed }: InputFrame, dt: number) {
     const feet = this.feet.set(this.player.position.x, this.player.feetY, this.player.position.z)
-    this.build.updatePreview(
-      this.piece,
-      {
-        x: feet.x,
-        z: feet.z,
-        feetY: feet.y,
-        yaw: this.cam.yaw,
-        pitch: this.cam.pitch,
-        airborne: !this.player.isGrounded,
-      },
-      feet,
-    )
+    this.build.updatePreview(this.piece, { feet, yaw: this.cam.yaw, target: this.aimTarget(feet) })
 
     // Clic = une pièce ; clic maintenu = une pièce toutes les `turboDelay` secondes.
     this.turboCooldown -= dt
@@ -196,6 +187,17 @@ export class Game {
         this.player.collider,
       )
     }
+  }
+
+  /**
+   * Point visé au réticule. La caméra étant derrière le joueur, le rayon part de
+   * la caméra et s'arrête à `aimReach` au-delà de la tête.
+   */
+  private aimTarget(feet: THREE.Vector3) {
+    const camera = this.cam.camera.position
+    const head = this.aimHead.set(feet.x, feet.y + CONFIG.camera.pivotHeight, feet.z)
+    const maxDistance = camera.distanceTo(head) + CONFIG.build.aimReach
+    return this.build.aimTarget(camera, this.cam.forward(this.aim), maxDistance, this.player.collider, this.aimPoint)
   }
 
   /** Un sol / une rampe posé à travers le joueur le remonte dessus au lieu de le bloquer. */

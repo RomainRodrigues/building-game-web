@@ -58,6 +58,10 @@ pnpm build        # build de production
   pour que la carte reste reproductible.
 - **Injecter Rapier** (`RapierModule`) dans les systèmes plutôt que l'importer partout.
   Les types viennent de `app/game/physics/rapier.ts`.
+- **Placement guidé par le réticule** : `computePlacement` ne dépend que du point visé
+  (`BuildAim.target`, rayon lancé depuis la caméra), des pieds du joueur et de son regard
+  horizontal. Pas de cas particuliers par situation : un nouveau comportement doit découler
+  du point visé, et être couvert par un test.
 - **Intégrité structurelle** : toute pose passe par `StructureGraph.isSupported`, et toute
   destruction par `BuildSystem.destroy` (qui gère les effondrements). Ne jamais retirer
   un mesh ou un collider de pièce à la main.
@@ -83,8 +87,9 @@ Les tests unitaires ne couvrent pas le rendu ni la physique. Pour ça, utiliser 
 - En headless, le rendu tourne en logiciel (environ 2 à 4 FPS) : ne pas juger la vitesse
   en temps réel. Arrêter la boucle (`__game.loop.stop()`) et appeler `__game.update(1/60)`
   à la main, en simulant les touches via `__game.input`.
-- La caméra (et donc le rayon de destruction) n'est mise à jour qu'au rendu : appeler
-  `__game.render(1, 1/60)` après avoir changé `cam.yaw` / `cam.pitch` dans un test.
+- La caméra (donc la visée et le rayon de destruction) n'est mise à jour qu'au rendu :
+  dans un test, appeler `__game.render(1, 1/60)` après chaque `update`, et laisser passer
+  2 ticks après avoir changé `cam.yaw` / `cam.pitch`.
 - Au moment du clic, Chromium envoie un faux mouvement de souris énorme : fixer
   `__game.cam.yaw` et `__game.cam.pitch` après le verrouillage du pointeur.
 - Les messages « WebGPU is not available » et « GPU stall due to ReadPixels » sont

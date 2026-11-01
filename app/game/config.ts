@@ -81,6 +81,11 @@ export const CONFIG = {
     roofHeight: 2,
     /** Délai entre deux poses quand on maintient le clic (turbo build). */
     turboDelay: 0.08,
+    /**
+     * Portée de visée pour construire, comptée depuis la tête du joueur : un peu
+     * moins d'une case, pour qu'en regardant devant soi la pièce arrive juste devant.
+     */
+    aimReach: 4.5,
     /** Portée max pour détruire une pièce, depuis le joueur. */
     editRange: 12,
     hp: { wall: 150, floor: 140, ramp: 140, roof: 140 },

@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu'
 import { CONFIG } from '../config'
 import type { RAPIER, RapierModule } from '../physics/rapier'
 import { createPlankTexture } from '../world/textures'
-import { computePlacement, type PieceSpec, type PieceType, type Viewer } from './BuildGrid'
+import { computePlacement, type BuildAim, type PieceSpec, type PieceType, type Vec3 } from './BuildGrid'
 import { StructureGraph } from './Structure'
 
 interface Piece {
@@ -26,6 +26,8 @@ const PIECE_COLORS: Record<PieceType, string> = {
 const GHOST_VALID = '#4fc3ff'
 const GHOST_INVALID = '#ff4f5e'
 const GHOST_OPACITY = 0.35
+/** Recul du point visé depuis la surface touchée, pour rester du côté du joueur. */
+const AIM_SURFACE_OFFSET = 0.05
 /** Le fantôme est dessiné après les objets opaques. */
 const GHOST_RENDER_ORDER = 10
 
@@ -86,13 +88,26 @@ export class BuildSystem {
   }
 
   /** Recalcule l'aperçu. `type = null` le masque (aucune pièce sélectionnée). */
-  updatePreview(type: PieceType | null, viewer: Viewer, playerFeet: THREE.Vector3) {
+  updatePreview(type: PieceType | null, aim: BuildAim) {
     if (!type) {
       this.setPreview(null)
       return
     }
-    const spec = computePlacement(type, viewer, (key) => this.pieces.get(key)?.spec)
-    this.setPreview({ spec, valid: this.canPlace(spec, playerFeet) })
+    const spec = computePlacement(type, aim, (key) => this.pieces.get(key)?.spec)
+    this.setPreview({ spec, valid: this.canPlace(spec, aim.feet) })
+  }
+
+  /**
+   * Point visé : premier impact du rayon (décor, sol ou pièce), ramené de
+   * `AIM_SURFACE_OFFSET` vers l'origine pour rester du côté du joueur, ou point
+   * situé à `maxDistance` si rien n'est touché.
+   */
+  aimTarget(origin: THREE.Vector3, dir: THREE.Vector3, maxDistance: number, ignore: RAPIER.Collider, out: THREE.Vector3) {
+    this.ray.origin = origin
+    this.ray.dir = dir
+    const hit = this.physics.castRay(this.ray, maxDistance, true, undefined, undefined, ignore)
+    const distance = hit ? Math.max(0, hit.timeOfImpact - AIM_SURFACE_OFFSET) : maxDistance
+    return out.copy(origin).addScaledVector(dir, distance)
   }
 
   /** Pose la pièce de l'aperçu si l'emplacement est valide. */
@@ -191,7 +206,7 @@ export class BuildSystem {
     this.pieces.delete(piece.spec.key)
   }
 
-  private canPlace(spec: PieceSpec, playerFeet: THREE.Vector3) {
+  private canPlace(spec: PieceSpec, playerFeet: Vec3) {
     if (this.pieces.has(spec.key) || spec.level < 0) return false
     const limit = CONFIG.world.halfSize
     if (Math.abs(spec.x) > limit || Math.abs(spec.z) > limit) return false
@@ -203,7 +218,7 @@ export class BuildSystem {
 }
 
 /** Test boîte (mur) contre boîte englobante du joueur. */
-function wallOverlapsPlayer(spec: PieceSpec, feet: THREE.Vector3) {
+function wallOverlapsPlayer(spec: PieceSpec, feet: Vec3) {
   const { radius, height } = CONFIG.player
   const overlapX = Math.abs(feet.x - spec.x) < radius + spec.sx / 2
   const overlapZ = Math.abs(feet.z - spec.z) < radius + spec.sz / 2

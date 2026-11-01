@@ -12,9 +12,10 @@ import {
   walkableSurfaceY,
   wallSpec,
   yawToDir,
+  type BuildAim,
   type PieceLookup,
   type PieceSpec,
-  type Viewer,
+  type Vec3,
 } from '../../app/game/build/BuildGrid'
 import { StructureGraph } from '../../app/game/build/Structure'
 
@@ -28,9 +29,9 @@ function world(...pieces: PieceSpec[]): PieceLookup {
 }
 const empty = world()
 
-/** Joueur au centre de la case (cx, cz), regard horizontal. */
-function viewer(cx: number, cz: number, overrides: Partial<Viewer> = {}): Viewer {
-  return { x: cx * T + T / 2, z: cz * T + T / 2, feetY: 0, yaw: 0, pitch: 0, airborne: false, ...overrides }
+/** Joueur au centre de la case (0, 0), au sol, regardant vers -Z, qui vise `target`. */
+function aim(target: Vec3, overrides: Partial<BuildAim> = {}): BuildAim {
+  return { feet: { x: T / 2, y: 0, z: T / 2 }, yaw: 0, target, ...overrides }
 }
 
 describe('yawToDir', () => {
@@ -149,122 +150,93 @@ describe('liftHeightAfterPlacing', () => {
 })
 
 describe('computePlacement', () => {
-  it('pose un mur sur le bord de la case, face au regard', () => {
-    expect(computePlacement('wall', viewer(0, 0), empty).key).toBe(wallSpec(0, 0, 0, 0).key)
-    expect(computePlacement('wall', viewer(0, 0, { yaw: Math.PI / 2 }), empty).key).toBe(wallSpec(0, 0, 0, 1).key)
+  describe('sol et toit', () => {
+    it('posent sur la case visée, au sol compris', () => {
+      expect(computePlacement('floor', aim({ x: 2.5, y: 0, z: -1 }), empty).key).toBe(floorSpec(0, 0, -1).key)
+      expect(computePlacement('roof', aim({ x: 2.5, y: 0, z: -2.5 }), empty).key).toBe(roofSpec(0, 0, -1).key)
+      expect(computePlacement('roof', aim({ x: 2.5, y: 0, z: 1 }), empty).key).toBe(roofSpec(0, 0, 0).key)
+    })
+
+    it('restent à l\'étage du joueur quand on regarde à peine vers le haut', () => {
+      expect(computePlacement('floor', aim({ x: 2.5, y: 2.4, z: -1 }), empty).level).toBe(0)
+    })
+
+    it('montent d\'un étage quand on vise en hauteur', () => {
+      expect(computePlacement('floor', aim({ x: 2.5, y: 4.5, z: 2.5 }), empty).key).toBe(floorSpec(0, 1, 0).key)
+      expect(computePlacement('roof', aim({ x: 2.5, y: 5, z: 2.5 }), empty).key).toBe(roofSpec(0, 1, 0).key)
+    })
+
+    it('permettent de poser un toit par-dessus un mur, dans la case derrière', () => {
+      expect(computePlacement('roof', aim({ x: 2.5, y: 4.5, z: -1 }), empty).key).toBe(roofSpec(0, 1, -1).key)
+    })
   })
 
-  it('monte le mur d\'un étage quand on regarde vers le haut', () => {
-    expect(computePlacement('wall', viewer(0, 0, { pitch: 1 }), empty).level).toBe(1)
-  })
+  describe('rampe', () => {
+    it('se pose sur la case visée, montant dans le sens du regard', () => {
+      expect(computePlacement('ramp', aim({ x: 2.5, y: 0.8, z: -2.5 }), empty).key).toBe(rampSpec(0, 0, -1, 0).key)
+      const east = computePlacement('ramp', aim({ x: 7.5, y: 0.8, z: 2.5 }, { yaw: -Math.PI / 2 }), empty)
+      expect(east.key).toBe(rampSpec(1, 0, 0, 3).key)
+      expect(east.dir).toBe(3)
+    })
 
-  it('choisit l\'étage du sol selon le regard', () => {
-    expect(computePlacement('floor', viewer(0, 0, { pitch: -1 }), empty).key).toBe(floorSpec(0, 0, 0).key)
-    expect(computePlacement('floor', viewer(0, 0, { pitch: 0.8 }), empty).key).toBe(floorSpec(0, 1, 0).key)
-    expect(computePlacement('floor', viewer(0, 0), empty).key).toBe(floorSpec(0, 0, -1).key)
-  })
-
-  it('ne construit la rampe dans la case du joueur que tout près de son bord bas', () => {
-    const backEdge = T // regard vers -Z : le bord bas de la case 0 est en z = T
-    expect(computePlacement('ramp', viewer(0, 0, { z: backEdge - 0.3 }), empty).key).toBe(rampSpec(0, 0, 0, 0).key)
-    expect(computePlacement('ramp', viewer(0, 0, { z: backEdge - 1.5 }), empty).key).toBe(rampSpec(0, 0, -1, 0).key)
-  })
-
-  it('pose la rampe dans la case devant le joueur', () => {
-    const spec = computePlacement('ramp', viewer(0, 0), empty)
-    expect(spec.key).toBe(rampSpec(0, 0, -1, 0).key)
-    expect(spec.dir).toBe(0)
-  })
-
-  it('pose le toit au-dessus du joueur, au sommet de son étage', () => {
-    expect(computePlacement('roof', viewer(0, 0), empty).key).toBe(roofSpec(0, 1, 0).key)
-    expect(computePlacement('roof', viewer(0, 0, { feetY: H, pitch: -1 }), empty).key).toBe(roofSpec(0, 2, 0).key)
-  })
-
-  describe('face à un mur', () => {
-    it('construit la rampe dans la case du joueur, jamais derrière le mur', () => {
-      const spec = computePlacement('ramp', viewer(0, 0), world(wallSpec(0, 0, 0, 0)))
+    it('se pose dans la case du joueur quand il est collé à un mur', () => {
+      // Le rayon touche le mur (z = 0) et le point visé est ramené du côté du joueur.
+      const spec = computePlacement('ramp', aim({ x: 2.5, y: 1.5, z: 0.05 }), world(wallSpec(0, 0, 0, 0)))
       expect(spec.key).toBe(rampSpec(0, 0, 0, 0).key)
-      expect(spec.dir).toBe(0)
     })
 
-    it('construit le sol dans la case du joueur', () => {
-      expect(computePlacement('floor', viewer(0, 0), world(wallSpec(0, 0, 0, 0))).key).toBe(floorSpec(0, 0, 0).key)
-    })
-
-    it('donne une rampe soutenue par le sol et le mur quand on est en hauteur', () => {
-      const floor = floorSpec(0, 1, 0)
-      const wall = wallSpec(0, 1, 0, 0)
-      const lower = wallSpec(0, 0, 0, 1)
-      const graph = new StructureGraph()
-      ;[lower, floor, wall].forEach((piece) => graph.add(piece))
-
-      const spec = computePlacement('ramp', viewer(0, 0, { feetY: H }), world(lower, floor, wall))
-      expect(spec.key).toBe(rampSpec(0, 1, 0, 0).key)
-      expect(graph.isSupported(spec)).toBe(true)
-    })
-  })
-
-  describe('rampe déjà présente', () => {
-    it('prolonge la rampe visée d\'une case et d\'un étage', () => {
+    it('prolonge une rampe déjà présente dans le même sens', () => {
       const existing = rampSpec(0, 0, -1, 0)
-      expect(computePlacement('ramp', viewer(0, 0), world(existing)).key).toBe(rampSpec(0, 1, -2, 0).key)
+      expect(computePlacement('ramp', aim({ x: 2.5, y: 0.8, z: -2.5 }), world(existing)).key).toBe(rampSpec(0, 1, -2, 0).key)
     })
 
-    it('n\'enchaîne pas si la rampe existante monte dans une autre direction', () => {
-      const existing = rampSpec(0, 0, -1, 3)
-      const spec = computePlacement('ramp', viewer(0, 0), world(existing))
-      expect(spec.key).toBe(existing.key) // emplacement occupé : aperçu invalide
-      expect(spec.level).toBe(0)
-    })
-  })
-
-  describe('sur une rampe qui monte dans le sens du regard', () => {
-    const current = rampSpec(0, 0, -1, 0)
-    const lookup = world(current)
-    const onRamp = viewer(0, -1, { feetY: H / 2 })
-
-    it('enchaîne les rampes vers le haut ("ramp rush")', () => {
-      expect(computePlacement('ramp', onRamp, lookup).key).toBe(rampSpec(0, 1, -2, 0).key)
-    })
-
-    it('enchaîne aussi depuis le bas de la rampe', () => {
-      const z = -0.5 // tout près du bord bas (z = 0)
-      const atBottom = viewer(0, -1, { z, feetY: rampMidlineY(current, T / 2, z) })
-      expect(computePlacement('ramp', atBottom, lookup).key).toBe(rampSpec(0, 1, -2, 0).key)
-    })
-
-    it('ne considère pas qu\'on monte quand on est SOUS la rampe', () => {
-      const z = -T + 0.5 // sous la partie haute
-      const below = viewer(0, -1, { z, feetY: 0 })
-      expect(computePlacement('floor', below, lookup).key).not.toBe(floorSpec(0, 1, -2).key)
-    })
-
-    it('pose le mur au bout de la rampe, au même étage, en regardant devant', () => {
-      const wall = computePlacement('wall', onRamp, lookup)
-      expect(wall.key).toBe(wallSpec(0, 0, -1, 0).key)
-      // Le haut du mur est exactement au sommet de la rampe.
-      expect(wall.y + wall.sy / 2).toBeCloseTo(H)
-    })
-
-    it('pose le mur au-dessus de la rampe en regardant vers le haut ou en sautant', () => {
-      const above = wallSpec(0, 1, -1, 0).key
-      expect(computePlacement('wall', { ...onRamp, pitch: 1 }, lookup).key).toBe(above)
-      expect(computePlacement('wall', { ...onRamp, airborne: true }, lookup).key).toBe(above)
-    })
-
-    it('prolonge la montée avec un sol au sommet de la rampe', () => {
-      expect(computePlacement('floor', onRamp, lookup).key).toBe(floorSpec(0, 1, -2).key)
-    })
-
-    it('pose des pièces reliées à la rampe (donc constructibles)', () => {
+    it('enchaîne vers le haut pendant une montée ("ramp rush")', () => {
+      const current = rampSpec(0, 0, -1, 0)
+      const climbing = aim({ x: 2.5, y: 3.4, z: -6 }, { feet: { x: 2.5, y: 2, z: -2.5 } })
+      const next = computePlacement('ramp', climbing, world(current))
+      expect(next.key).toBe(rampSpec(0, 1, -2, 0).key)
       const graph = new StructureGraph()
       graph.add(current)
-      for (const type of ['wall', 'floor', 'ramp'] as const) {
-        for (const view of [onRamp, { ...onRamp, airborne: true }]) {
-          expect(graph.isSupported(computePlacement(type, view, lookup))).toBe(true)
-        }
-      }
+      expect(graph.isSupported(next)).toBe(true)
+    })
+  })
+
+  describe('mur', () => {
+    it('se pose sur le bord avant de la case du joueur quand on vise devant soi', () => {
+      expect(computePlacement('wall', aim({ x: 2.5, y: 0, z: 1 }), empty).key).toBe(wallSpec(0, 0, 0, 0).key)
+      // À égalité, la ligne la plus proche du joueur l'emporte.
+      expect(computePlacement('wall', aim({ x: 2.5, y: 1, z: -2.5 }), empty).key).toBe(wallSpec(0, 0, 0, 0).key)
+    })
+
+    it('se pose plus loin quand on vise plus loin', () => {
+      expect(computePlacement('wall', aim({ x: 2.5, y: 1, z: -4 }), empty).key).toBe(wallSpec(0, 0, -1, 0).key)
+    })
+
+    it('n\'est jamais posé derrière le joueur', () => {
+      const atBack = aim({ x: 2.5, y: 1, z: 2.5 }, { feet: { x: 2.5, y: 0, z: 4.5 } })
+      expect(computePlacement('wall', atBack, empty).key).toBe(wallSpec(0, 0, 0, 0).key)
+    })
+
+    it('se pose au bout d\'une rampe en visant devant, au-dessus en visant haut', () => {
+      const onRamp = { feet: { x: 2.5, y: 2, z: -2.5 } }
+      expect(computePlacement('wall', aim({ x: 2.5, y: 2.8, z: -6 }, onRamp), empty).key).toBe(wallSpec(0, 0, -1, 0).key)
+      expect(computePlacement('wall', aim({ x: 2.5, y: 5, z: -6 }, onRamp), empty).key).toBe(wallSpec(0, 1, -1, 0).key)
+    })
+
+    it('suit l\'orientation du regard', () => {
+      const west = computePlacement('wall', aim({ x: 1, y: 1, z: 2.5 }, { yaw: Math.PI / 2 }), empty)
+      expect(west.key).toBe(wallSpec(0, 0, 0, 1).key)
+    })
+  })
+
+  describe('portée', () => {
+    it('limite la case aux voisines de celle du joueur', () => {
+      expect(computePlacement('floor', aim({ x: 2.5, y: 0, z: -30 }), empty).key).toBe(floorSpec(0, 0, -1).key)
+    })
+
+    it('limite l\'étage à un étage près autour du joueur', () => {
+      expect(computePlacement('floor', aim({ x: 2.5, y: 40, z: 2.5 }), empty).level).toBe(1)
+      expect(computePlacement('floor', aim({ x: 2.5, y: -10, z: 2.5 }), empty).level).toBe(0)
     })
   })
 })

@@ -22,11 +22,11 @@ Puis ouvrir http://localhost:3000 → **Free Build** → cliquer pour verrouille
 | Détruire la pièce visée | Clic droit |
 | Pause | Échap |
 
-Astuce : regarder vers le haut / bas change l'étage du sol et du mur. Une pièce doit être
-reliée au sol (directement ou via d'autres pièces) : sinon l'aperçu est rouge, et détruire
-un support fait s'effondrer tout ce qu'il portait. Rampe + avancer en
-maintenant le clic = "ramp rush". Sur une rampe, le mur se pose au bout de la rampe ;
-en regardant vers le haut ou en sautant, il passe au-dessus.
+Astuce : la pièce se pose là où vise le réticule (sur ta case ou une case voisine, à ton
+étage ou un étage plus haut ou plus bas). Vise le sol pour poser au sol, vise plus haut pour
+monter, vise au-dessus d'un mur pour construire derrière. Une pièce doit être reliée au sol
+(directement ou via d'autres pièces) : sinon l'aperçu est rouge, et détruire un support fait
+s'effondrer tout ce qu'il portait. Rampe + avancer en maintenant le clic = "ramp rush".
 
 ## Scripts
 

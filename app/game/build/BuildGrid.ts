@@ -41,15 +41,23 @@ export interface PieceSpec {
   dir: Dir
 }
 
-/** Position et regard du joueur, seules données nécessaires au placement. */
-export interface Viewer {
+export interface Vec3 {
   x: number
+  y: number
   z: number
-  feetY: number
+}
+
+/** Données de visée, seules entrées nécessaires au placement d'une pièce. */
+export interface BuildAim {
+  /** Pieds du joueur. */
+  feet: Vec3
+  /** Orientation horizontale de la caméra (radians) : sens des rampes et des murs. */
   yaw: number
-  pitch: number
-  /** Le joueur est en l'air (saut, chute). */
-  airborne: boolean
+  /**
+   * Point visé au réticule : impact du rayon de visée sur le décor ou une pièce
+   * (légèrement ramené vers la caméra), ou point à portée maximale.
+   */
+  target: Vec3
 }
 
 /** Recherche d'une pièce existante par sa clé d'emplacement. */
@@ -60,22 +68,20 @@ const H = CONFIG.build.height
 const TH = CONFIG.build.thickness
 const ROOF_H = CONFIG.build.roofHeight
 const QUARTER_TURN = Math.PI / 2
+/** Petite marge numérique pour les comparaisons aux lignes de la grille. */
+const EPSILON = 1e-6
 
 /** Marge pour qu'un joueur posé sur un sol soit compté à l'étage de ce sol. */
 const LEVEL_TOLERANCE = 0.3
-/** Distance (en cases) du point "devant le joueur" servant à choisir la case cible. */
-const LOOK_AHEAD_TILES = 0.6
+/** On ne construit que dans la case du joueur et ses voisines (en cases). */
+const TILE_REACH = 1
+/** On ne construit qu'à un étage près autour de celui du joueur. */
+const LEVEL_REACH = 1
 /**
- * Idem pour les rampes, plus loin : une rampe ne se construit dans la case du
- * joueur que s'il est tout près de son bord bas (remontée de l'ordre d'une marche).
+ * Sols et rampes passent à l'étage supérieur quand le point visé dépasse les
+ * 3/4 de l'étage courant : regarder un peu vers le haut ne suffit pas.
  */
-const RAMP_LOOK_AHEAD_TILES = 0.85
-/** Tolérance sous la surface d'une rampe pour considérer que le joueur est dessus. */
-const ON_RAMP_TOLERANCE = 0.5
-/** Seuils d'inclinaison du regard (radians). */
-const PITCH_WALL_UP = 0.75
-const PITCH_FLOOR_UP = 0.5
-const PITCH_FLOOR_DOWN = -0.7
+const UPPER_LEVEL_FRACTION = 0.75
 
 /** Vecteur (x, z) unitaire de chaque direction. */
 export const DIR_VEC: Readonly<Record<Dir, readonly [number, number]>> = {
@@ -240,66 +246,87 @@ export function walkableSurfaceY(spec: PieceSpec, x: number, z: number): number 
 }
 
 /**
- * Choisit l'emplacement de la pièce à poser selon la position et le regard du
- * joueur, en tenant compte des pièces existantes (`lookup`) :
- *  - sur une rampe qui monte dans le sens du regard, les pièces prolongent la montée ;
- *  - face à un mur, rampes et sols se construisent dans la case du joueur ;
- *  - une rampe visée là où il y en a déjà une dans le même sens la prolonge ;
- *  - un toit se pose toujours au-dessus du joueur, au sommet de son étage.
+ * Choisit l'emplacement de la pièce à poser à partir du POINT VISÉ au réticule,
+ * comme dans les jeux du genre :
+ *  - la case est celle qui contient le point visé (bornée aux cases voisines) ;
+ *  - l'étage dépend de la hauteur du point visé (borné à un étage près) ;
+ *  - sol / toit : sur la case visée, au sol compris ;
+ *  - rampe : sur la case visée, montant dans le sens du regard ; si une rampe
+ *    montant dans le même sens y est déjà, la nouvelle la prolonge ;
+ *  - mur : sur le bord de case, perpendiculaire au regard, le plus proche du point visé.
+ *
+ * Les comportements usuels en découlent : collé à un mur, le rayon touche le mur
+ * et la rampe se pose de notre côté ; viser au-dessus d'un mur pose un toit derrière.
  */
-export function computePlacement(type: PieceType, viewer: Viewer, lookup: PieceLookup): PieceSpec {
-  const dir = yawToDir(viewer.yaw)
-  const [fx, fz] = DIR_VEC[dir]
-  const [cx, cz] = cellOf(viewer.x, viewer.z)
-  const level = levelOf(viewer.feetY)
+export function computePlacement(type: PieceType, aim: BuildAim, lookup: PieceLookup): PieceSpec {
+  const dir = yawToDir(aim.yaw)
+  const [pcx, pcz] = cellOf(aim.feet.x, aim.feet.z)
+  const playerLevel = levelOf(aim.feet.y)
 
-  if (isClimbing(viewer, cx, level, cz, dir, lookup)) {
-    // "Ramp rush" :
-    //  - rampe / sol : dans la case suivante, un étage plus haut (prolongent la montée) ;
-    //  - mur : au bout de la rampe, au même étage (la rampe s'appuie contre lui) ;
-    //    en regardant vers le haut ou en sautant, il passe au-dessus de la rampe.
-    // Dans tous les cas la pièce partage le bord haut de la rampe : elle est soutenue.
-    if (type === 'ramp') return rampSpec(cx + fx, level + 1, cz + fz, dir)
-    if (type === 'floor') return floorSpec(cx + fx, level + 1, cz + fz)
-    if (type === 'roof') return roofSpec(cx, level + 1, cz)
-    const above = viewer.airborne || viewer.pitch > PITCH_WALL_UP
-    return wallSpec(cx, above ? level + 1 : level, cz, dir)
-  }
-
-  // Case "devant" : celle qui contient un point situé un peu devant le joueur.
-  // Si un mur se dresse entre le joueur et cette case, on construit dans sa propre case.
-  const lookAhead = T * (type === 'ramp' ? RAMP_LOOK_AHEAD_TILES : LOOK_AHEAD_TILES)
-  let [ax, az] = cellOf(viewer.x + fx * lookAhead, viewer.z + fz * lookAhead)
-  const aheadIsOtherCell = ax !== cx || az !== cz
-  if (aheadIsOtherCell && lookup(wallSpec(cx, level, cz, dir).key)) {
-    ax = cx
-    az = cz
-  }
+  // Point visé ramené dans la zone constructible (case du joueur +/- TILE_REACH).
+  const x = clamp(aim.target.x, (pcx - TILE_REACH) * T, (pcx + TILE_REACH + 1) * T - EPSILON)
+  const z = clamp(aim.target.z, (pcz - TILE_REACH) * T, (pcz + TILE_REACH + 1) * T - EPSILON)
+  const [cx, cz] = cellOf(x, z)
+  const level = (raw: number) => clamp(raw, Math.max(0, playerLevel - LEVEL_REACH), playerLevel + LEVEL_REACH)
 
   switch (type) {
-    case 'wall':
-      return wallSpec(cx, viewer.pitch > PITCH_WALL_UP ? level + 1 : level, cz, dir)
     case 'floor':
-      if (viewer.pitch < PITCH_FLOOR_DOWN) return floorSpec(cx, level, cz)
-      if (viewer.pitch > PITCH_FLOOR_UP) return floorSpec(cx, level + 1, cz)
-      return floorSpec(ax, level, az)
+      return floorSpec(cx, level(surfaceLevel(aim.target.y)), cz)
     case 'roof':
-      // Toujours au-dessus du joueur, au sommet de son étage (sur ses murs).
-      return roofSpec(cx, level + 1, cz)
+      // La base du toit est sous le point visé : viser le sol le pose au sol.
+      return roofSpec(cx, level(Math.floor(aim.target.y / H)), cz)
     case 'ramp': {
-      const target = rampSpec(ax, level, az, dir)
-      // Une rampe existe déjà ici dans le même sens : on la prolonge d'une case.
+      const target = rampSpec(cx, level(surfaceLevel(aim.target.y)), cz, dir)
       const existing = lookup(target.key)
-      if (existing?.dir === dir) return rampSpec(ax + fx, level + 1, az + fz, dir)
-      return target
+      if (existing?.dir !== dir) return target
+      // Une rampe montant dans le même sens est déjà là : on la prolonge.
+      const [fx, fz] = DIR_VEC[dir]
+      return rampSpec(cx + fx, target.level + 1, cz + fz, dir)
     }
+    case 'wall':
+      return wallFacing(dir, x, z, aim.feet, level(Math.floor(aim.target.y / H)))
   }
 }
 
-/** Le joueur se tient sur une rampe de sa case qui monte dans la direction `dir`. */
-function isClimbing(viewer: Viewer, cx: number, level: number, cz: number, dir: Dir, lookup: PieceLookup) {
-  const ramp = lookup(rampSpec(cx, level, cz, dir).key)
-  if (ramp?.dir !== dir) return false
-  const surface = walkableSurfaceY(ramp, viewer.x, viewer.z)
-  return surface !== null && viewer.feetY >= surface - ON_RAMP_TOLERANCE
+/**
+ * Mur perpendiculaire à `dir`, sur la ligne de grille la plus proche du point
+ * (x, z) parmi celles qui ne sont pas derrière le joueur.
+ */
+function wallFacing(dir: Dir, x: number, z: number, feet: Vec3, level: number): PieceSpec {
+  const alongX = dir === 1 || dir === 3
+  const [fx, fz] = DIR_VEC[dir]
+  const forward = alongX ? fx : fz
+  const point = alongX ? x : z
+  const player = alongX ? feet.x : feet.z
+
+  // Les deux lignes de grille qui encadrent le point visé sur l'axe du regard.
+  const before = Math.floor(point / T)
+  // Lignes devant le joueur, de la plus proche de lui à la plus éloignée
+  // (à distance égale du point visé, on garde la plus proche du joueur).
+  const candidates = [before, before + 1]
+    .filter((line) => (line * T - player) * forward > -EPSILON)
+    .sort((a, b) => Math.abs(a * T - player) - Math.abs(b * T - player))
+  // Point visé derrière le joueur : on prend le bord avant de sa propre case.
+  const ownFrontLine = forward > 0 ? Math.floor(player / T) + 1 : Math.floor(player / T)
+  const line = candidates.length === 0
+    ? ownFrontLine
+    : candidates.reduce((best, c) => (Math.abs(c * T - point) < Math.abs(best * T - point) ? c : best))
+
+  // wallSpec attend une case et le côté de cette case : on prend la case
+  // derrière la ligne (côté joueur) et son bord avant.
+  if (alongX) {
+    const [, cz] = cellOf(x, z)
+    return forward > 0 ? wallSpec(line - 1, level, cz, 3) : wallSpec(line, level, cz, 1)
+  }
+  const [cx] = cellOf(x, z)
+  return forward > 0 ? wallSpec(cx, level, line - 1, 2) : wallSpec(cx, level, line, 0)
+}
+
+/** Étage d'un sol ou du bas d'une rampe pour un point visé à la hauteur `y`. */
+function surfaceLevel(y: number) {
+  return Math.floor(y / H + 1 - UPPER_LEVEL_FRACTION)
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
 }

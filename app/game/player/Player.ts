@@ -87,10 +87,6 @@ export class Player {
     return this.position.y - HALF_HEIGHT
   }
 
-  get isGrounded() {
-    return this.grounded
-  }
-
   get horizontalSpeed() {
     return Math.hypot(this.velocity.x, this.velocity.z)
   }

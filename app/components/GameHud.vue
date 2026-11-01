@@ -65,8 +65,8 @@ const paused = computed(() => !props.hud.locked)
           <li><b>1 / 2 / 3 / 4</b> ou <b>molette</b> : mur / sol / rampe / toit · <b>X</b> ranger</li>
           <li><b>Clic droit</b> détruire la pièce visée · <b>Échap</b> pause</li>
           <li class="hint">
-            Regarder vers le haut / bas change l'étage du sol et du mur. Une pièce doit
-            être reliée au sol, sinon elle ne peut pas être posée.
+            La pièce se pose là où vise le réticule (case et étage). Elle doit être
+            reliée au sol, sinon elle ne peut pas être posée.
           </li>
         </ul>
       </div>
