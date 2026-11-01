@@ -1,10 +1,13 @@
 /**
  * Intégrité structurelle des constructions : logique PURE (ni Three.js ni Rapier).
  *
- * Chaque pièce occupe des "jointures" de la grille :
- *  - arêtes horizontales (bord d'une case, à la hauteur d'un étage) ;
- *  - poteaux verticaux (coin d'une case, sur un étage), partagés par les murs et les rampes.
- * Deux pièces qui partagent une jointure sont connectées.
+ * Chaque pièce occupe des "jointures" de la grille, et deux pièces sont connectées
+ * si elles en partagent une. Un simple contact par un coin ne suffit jamais.
+ *  - arêtes horizontales (bord d'une case, à la hauteur d'un étage) : sols, murs, bords
+ *    bas et haut des rampes ;
+ *  - poteaux verticaux (coin d'une case, sur un étage) : murs entre eux ;
+ *  - diagonales (côté d'une rampe, sur la face verticale d'une frontière) : partagées par
+ *    deux rampes parallèles montant dans le même sens, et par le mur posé sur cette face.
  *
  * Règles :
  *  - une pièce posée à l'étage 0 repose sur le terrain : elle est ancrée ;
@@ -13,7 +16,7 @@
  *  - quand une pièce disparaît, tout ce qui n'est plus relié au sol s'effondre.
  */
 import { CONFIG } from '../config'
-import type { PieceSpec } from './BuildGrid'
+import type { Dir, PieceSpec } from './BuildGrid'
 
 const T = CONFIG.build.tile
 
@@ -23,6 +26,10 @@ const edgeAlongX = (cx: number, level: number, bz: number) => `ex:${cx}:${level}
 const edgeAlongZ = (bx: number, level: number, cz: number) => `ez:${bx}:${level}:${cz}`
 /** Poteau vertical au coin (bx, bz), entre les étages `level` et `level + 1`. */
 const post = (bx: number, bz: number, level: number) => `p:${bx}:${bz}:${level}`
+/** Diagonale sur la face x = bx (case cz, étage `level`), montant vers `dir` (0 ou 2). */
+const diagonalOnX = (bx: number, level: number, cz: number, dir: Dir) => `dx:${bx}:${level}:${cz}:${dir}`
+/** Diagonale sur la face z = bz (case cx, étage `level`), montant vers `dir` (1 ou 3). */
+const diagonalOnZ = (bz: number, level: number, cx: number, dir: Dir) => `dz:${bz}:${level}:${cx}:${dir}`
 
 /** Indice de case contenant un centre de pièce (centre = case * T + T/2). */
 const cellIndex = (center: number) => Math.floor(center / T)
@@ -53,6 +60,9 @@ export function jointsOf(spec: PieceSpec): string[] {
           edgeAlongZ(bx, level + 1, cz),
           post(bx, cz, level),
           post(bx, cz + 1, level),
+          // Le mur porte le côté d'une rampe posée contre lui, quel que soit son sens.
+          diagonalOnX(bx, level, cz, 0),
+          diagonalOnX(bx, level, cz, 2),
         ]
       }
       const bz = boundaryIndex(spec.z)
@@ -62,19 +72,21 @@ export function jointsOf(spec: PieceSpec): string[] {
         edgeAlongX(cx, level + 1, bz),
         post(cx, bz, level),
         post(cx + 1, bz, level),
+        diagonalOnZ(bz, level, cx, 1),
+        diagonalOnZ(bz, level, cx, 3),
       ]
     }
     case 'ramp': {
       const cx = cellIndex(spec.x)
       const cz = cellIndex(spec.z)
-      // Les 4 poteaux de coin relient la rampe aux murs et rampes posés à côté d'elle.
-      const corners = [post(cx, cz, level), post(cx + 1, cz, level), post(cx, cz + 1, level), post(cx + 1, cz + 1, level)]
-      // Bord bas à l'étage `level`, bord haut à `level + 1`, côté vers lequel la rampe monte.
-      switch (spec.dir) {
-        case 0: return [edgeAlongX(cx, level, cz + 1), edgeAlongX(cx, level + 1, cz), ...corners]
-        case 2: return [edgeAlongX(cx, level, cz), edgeAlongX(cx, level + 1, cz + 1), ...corners]
-        case 1: return [edgeAlongZ(cx + 1, level, cz), edgeAlongZ(cx, level + 1, cz), ...corners]
-        case 3: return [edgeAlongZ(cx, level, cz), edgeAlongZ(cx + 1, level + 1, cz), ...corners]
+      const dir = spec.dir
+      // Bord bas à l'étage `level`, bord haut à `level + 1` (côté vers lequel la rampe
+      // monte), plus ses deux côtés diagonaux.
+      switch (dir) {
+        case 0: return [edgeAlongX(cx, level, cz + 1), edgeAlongX(cx, level + 1, cz), diagonalOnX(cx, level, cz, dir), diagonalOnX(cx + 1, level, cz, dir)]
+        case 2: return [edgeAlongX(cx, level, cz), edgeAlongX(cx, level + 1, cz + 1), diagonalOnX(cx, level, cz, dir), diagonalOnX(cx + 1, level, cz, dir)]
+        case 1: return [edgeAlongZ(cx + 1, level, cz), edgeAlongZ(cx, level + 1, cz), diagonalOnZ(cz, level, cx, dir), diagonalOnZ(cz + 1, level, cx, dir)]
+        case 3: return [edgeAlongZ(cx, level, cz), edgeAlongZ(cx + 1, level + 1, cz), diagonalOnZ(cz, level, cx, dir), diagonalOnZ(cz + 1, level, cx, dir)]
       }
     }
   }

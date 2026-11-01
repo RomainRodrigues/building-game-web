@@ -22,10 +22,21 @@ describe('jointsOf', () => {
     expect(shareJoint(jointsOf(rampSpec(0, 0, -1, 0)), jointsOf(rampSpec(0, 1, -2, 0)))).toBe(true)
   })
 
-  it('relie une rampe aux murs et aux rampes posés à côté', () => {
+  it('relie une rampe au mur posé contre son côté, quel que soit son sens', () => {
+    expect(shareJoint(jointsOf(rampSpec(0, 1, 0, 0)), jointsOf(wallSpec(0, 1, 0, 1)))).toBe(true)
+    expect(shareJoint(jointsOf(rampSpec(0, 1, 0, 2)), jointsOf(wallSpec(0, 1, 0, 3)))).toBe(true)
+    expect(shareJoint(jointsOf(rampSpec(0, 1, 0, 1)), jointsOf(wallSpec(0, 1, 0, 0)))).toBe(true)
+  })
+
+  it('relie deux rampes parallèles qui montent dans le même sens', () => {
+    expect(shareJoint(jointsOf(rampSpec(0, 1, 0, 0)), jointsOf(rampSpec(1, 1, 0, 0)))).toBe(true)
+  })
+
+  it('ne relie pas deux rampes voisines de sens différents (contact par un coin seulement)', () => {
     const ramp = rampSpec(0, 1, 0, 0)
-    expect(shareJoint(jointsOf(ramp), jointsOf(wallSpec(0, 1, 0, 1)))).toBe(true)
-    expect(shareJoint(jointsOf(ramp), jointsOf(rampSpec(1, 1, 0, 0)))).toBe(true)
+    expect(shareJoint(jointsOf(ramp), jointsOf(rampSpec(1, 1, 0, 2)))).toBe(false)
+    expect(shareJoint(jointsOf(ramp), jointsOf(rampSpec(1, 1, 0, 3)))).toBe(false)
+    expect(shareJoint(jointsOf(ramp), jointsOf(rampSpec(1, 1, 0, 1)))).toBe(false)
   })
 
   it('ne relie pas deux sols éloignés ni deux sols d\'étages différents', () => {
@@ -85,6 +96,13 @@ describe('StructureGraph', () => {
 
     expect(graph.remove(left.key)).toEqual([])
     expect(graph.has(roof.key)).toBe(true)
+  })
+
+  it('refuse une rampe en hauteur posée à côté d\'une autre dans un autre sens', () => {
+    const climb = [rampSpec(0, 0, -1, 0), rampSpec(0, 1, -2, 0)]
+    climb.forEach((ramp) => graph.add(ramp))
+    expect(graph.isSupported(rampSpec(1, 1, -2, 3))).toBe(false)
+    expect(graph.isSupported(rampSpec(1, 1, -2, 0))).toBe(true)
   })
 
   it('effondre toute une montée de rampes quand on coupe la première', () => {
