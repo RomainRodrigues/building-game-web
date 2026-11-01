@@ -165,7 +165,14 @@ export class Game {
     const feet = this.feet.set(this.player.position.x, this.player.feetY, this.player.position.z)
     this.build.updatePreview(
       this.piece,
-      { x: feet.x, z: feet.z, feetY: feet.y, yaw: this.cam.yaw, pitch: this.cam.pitch },
+      {
+        x: feet.x,
+        z: feet.z,
+        feetY: feet.y,
+        yaw: this.cam.yaw,
+        pitch: this.cam.pitch,
+        airborne: !this.player.isGrounded,
+      },
       feet,
     )
 

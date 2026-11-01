@@ -25,7 +25,8 @@ Puis ouvrir http://localhost:3000 → **Free Build** → cliquer pour verrouille
 Astuce : regarder vers le haut / bas change l'étage du sol et du mur. Une pièce doit être
 reliée au sol (directement ou via d'autres pièces) : sinon l'aperçu est rouge, et détruire
 un support fait s'effondrer tout ce qu'il portait. Rampe + avancer en
-maintenant le clic = "ramp rush".
+maintenant le clic = "ramp rush". Sur une rampe, le mur se pose au bout de la rampe ;
+en regardant vers le haut ou en sautant, il passe au-dessus.
 
 ## Scripts
 

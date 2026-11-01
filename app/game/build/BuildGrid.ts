@@ -47,6 +47,8 @@ export interface Viewer {
   feetY: number
   yaw: number
   pitch: number
+  /** Le joueur est en l'air (saut, chute). */
+  airborne: boolean
 }
 
 export type RampLookup = (cx: number, level: number, cz: number) => PieceSpec | undefined
@@ -202,13 +204,15 @@ export function computePlacement(type: PieceType, viewer: Viewer, rampAt: RampLo
   if (climbing) {
     // Sur une rampe qui monte dans le sens du regard ("ramp rush") :
     //  - rampe / sol : dans la case suivante, un étage plus haut (prolongent la montée) ;
-    //  - mur : debout sur le bord haut de la rampe actuelle, pour protéger la montée.
-    // Dans les trois cas la pièce partage le bord haut de la rampe : elle est soutenue.
+    //  - mur : au bout de la rampe, au même étage (la rampe s'appuie contre lui) ;
+    //    en regardant vers le haut ou en sautant, il passe au-dessus de la rampe.
+    // Dans tous les cas la pièce partage le bord haut de la rampe : elle est soutenue.
     const nx = cx + fx
     const nz = cz + fz
     if (type === 'ramp') return rampSpec(nx, level + 1, nz, dir)
     if (type === 'floor') return floorSpec(nx, level + 1, nz)
-    return wallSpec(cx, level + 1, cz, dir)
+    const above = viewer.airborne || viewer.pitch > PITCH_WALL_UP
+    return wallSpec(cx, above ? level + 1 : level, cz, dir)
   }
 
   // Case "devant" : celle qui contient un point situé un peu devant le joueur.

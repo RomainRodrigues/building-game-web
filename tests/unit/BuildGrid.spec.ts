@@ -21,7 +21,7 @@ const noRamp = () => undefined
 
 /** Joueur au centre de la case (cx, cz), regard horizontal. */
 function viewer(cx: number, cz: number, overrides: Partial<Viewer> = {}): Viewer {
-  return { x: cx * T + T / 2, z: cz * T + T / 2, feetY: 0, yaw: 0, pitch: 0, ...overrides }
+  return { x: cx * T + T / 2, z: cz * T + T / 2, feetY: 0, yaw: 0, pitch: 0, airborne: false, ...overrides }
 }
 
 describe('yawToDir', () => {
@@ -136,11 +136,17 @@ describe('computePlacement', () => {
       cx === 0 && level === 0 && cz === -1 ? current : undefined
     const onRamp = viewer(0, -1, { feetY: H / 2 })
 
-    it('pose le mur sur le bord haut de la rampe, pas dans la case suivante', () => {
+    it('pose le mur au bout de la rampe, au même étage, en regardant devant', () => {
       const wall = computePlacement('wall', onRamp, rampAt)
-      expect(wall.key).toBe(wallSpec(0, 1, -1, 0).key)
-      // Le bas du mur est exactement au sommet de la rampe.
-      expect(wall.y - wall.sy / 2).toBeCloseTo(H)
+      expect(wall.key).toBe(wallSpec(0, 0, -1, 0).key)
+      // Le haut du mur est exactement au sommet de la rampe.
+      expect(wall.y + wall.sy / 2).toBeCloseTo(H)
+    })
+
+    it('pose le mur au-dessus de la rampe en regardant vers le haut ou en sautant', () => {
+      const above = wallSpec(0, 1, -1, 0).key
+      expect(computePlacement('wall', { ...onRamp, pitch: 1 }, rampAt).key).toBe(above)
+      expect(computePlacement('wall', { ...onRamp, airborne: true }, rampAt).key).toBe(above)
     })
 
     it('prolonge la montée avec un sol au sommet de la rampe', () => {
@@ -151,7 +157,9 @@ describe('computePlacement', () => {
       const graph = new StructureGraph()
       graph.add(current)
       for (const type of ['wall', 'floor', 'ramp'] as const) {
-        expect(graph.isSupported(computePlacement(type, onRamp, rampAt))).toBe(true)
+        for (const view of [onRamp, { ...onRamp, airborne: true }]) {
+          expect(graph.isSupported(computePlacement(type, view, rampAt))).toBe(true)
+        }
       }
     })
   })
