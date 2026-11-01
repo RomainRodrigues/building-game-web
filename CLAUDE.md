@@ -31,7 +31,7 @@ pnpm build        # build de production
 - `app/components/GameCanvas.client.vue` : seul pont Vue <-> moteur. Crée le `Game`,
   l'expose au HUD et appelle `dispose()` au démontage.
 - `app/game/hud.ts` : contrat `HudState`, le SEUL état réactif côté Vue.
-- `app/game/build/BuildGrid.ts`, `core/Loop.ts`, `utils/random.ts` : logique pure,
+- `app/game/build/BuildGrid.ts`, `build/Structure.ts`, `core/Loop.ts`, `utils/random.ts` : logique pure,
   sans Three.js ni Rapier, couverte par les tests unitaires.
 - Stack : Nuxt 4, Three.js `WebGPURenderer` (import depuis `three/webgpu`, avec fallback
   WebGL2 automatique), Rapier `@dimforge/rapier3d-compat`.
@@ -58,6 +58,12 @@ pnpm build        # build de production
   pour que la carte reste reproductible.
 - **Injecter Rapier** (`RapierModule`) dans les systèmes plutôt que l'importer partout.
   Les types viennent de `app/game/physics/rapier.ts`.
+- **Intégrité structurelle** : toute pose passe par `StructureGraph.isSupported`, et toute
+  destruction par `BuildSystem.destroy` (qui gère les effondrements). Ne jamais retirer
+  un mesh ou un collider de pièce à la main.
+- **Le joueur ne doit jamais être placé au contact exact d'une surface** (téléportation,
+  apparition) : le character controller Rapier ne sort pas d'une pénétration. Garder un jeu
+  (voir `SPAWN_CLEARANCE`, `LIFT_CLEARANCE`).
 - **`PlayerCommand`** est le format d'entrée de la simulation, prévu pour un futur
   multijoueur. Ne pas faire lire `Input` directement par la simulation.
 
@@ -75,6 +81,8 @@ Les tests unitaires ne couvrent pas le rendu ni la physique. Pour ça, utiliser 
 - En headless, le rendu tourne en logiciel (environ 2 à 4 FPS) : ne pas juger la vitesse
   en temps réel. Arrêter la boucle (`__game.loop.stop()`) et appeler `__game.update(1/60)`
   à la main, en simulant les touches via `__game.input`.
+- La caméra (et donc le rayon de destruction) n'est mise à jour qu'au rendu : appeler
+  `__game.render(1, 1/60)` après avoir changé `cam.yaw` / `cam.pitch` dans un test.
 - Au moment du clic, Chromium envoie un faux mouvement de souris énorme : fixer
   `__game.cam.yaw` et `__game.cam.pitch` après le verrouillage du pointeur.
 - Les messages « WebGPU is not available » et « GPU stall due to ReadPixels » sont

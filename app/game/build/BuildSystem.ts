@@ -3,6 +3,7 @@ import { CONFIG } from '../config'
 import type { RAPIER, RapierModule } from '../physics/rapier'
 import { createPlankTexture } from '../world/textures'
 import { computePlacement, walkableSurfaceY, type PieceSpec, type PieceType, type Viewer } from './BuildGrid'
+import { StructureGraph } from './Structure'
 
 interface Piece {
   readonly spec: PieceSpec
@@ -30,10 +31,12 @@ const GHOST_RENDER_ORDER = 10
 /**
  * Pose, aperçu ("fantôme") et destruction des constructions.
  * Chaque pièce = un mesh (cube unitaire mis à l'échelle) + un collider Rapier fixe.
+ * Les règles d'appui (pièces reliées au sol, effondrements) sont déléguées à `StructureGraph`.
  */
 export class BuildSystem {
   private readonly pieces = new Map<string, Piece>()
   private readonly byCollider = new Map<number, Piece>()
+  private readonly structure = new StructureGraph()
   private readonly box = new THREE.BoxGeometry(1, 1, 1)
   private readonly texture = createPlankTexture()
   private readonly materials: Record<PieceType, THREE.MeshStandardMaterial>
@@ -86,14 +89,14 @@ export class BuildSystem {
   /** Pose la pièce de l'aperçu si l'emplacement est valide. */
   placePreview(): PieceSpec | null {
     const preview = this._preview
-    if (!preview?.valid) return null
-    this.place(preview.spec)
+    if (!preview?.valid || !this.place(preview.spec)) return null
     this.setPreview({ spec: preview.spec, valid: false })
     return preview.spec
   }
 
-  place(spec: PieceSpec) {
-    if (this.pieces.has(spec.key)) return
+  /** Pose une pièce si elle est soutenue. Renvoie `false` sinon. */
+  place(spec: PieceSpec): boolean {
+    if (this.pieces.has(spec.key) || !this.structure.isSupported(spec)) return false
     const mesh = new THREE.Mesh(this.box, this.materials[spec.type])
     applyTransform(mesh, spec)
     mesh.castShadow = true
@@ -112,17 +115,28 @@ export class BuildSystem {
     const piece: Piece = { spec, mesh, collider, hp: CONFIG.build.hp[spec.type] }
     this.pieces.set(spec.key, piece)
     this.byCollider.set(collider.handle, piece)
+    this.structure.add(spec)
+    return true
   }
 
-  /** Détruit la pièce touchée par le rayon. Renvoie `true` si une pièce a été détruite. */
+  /**
+   * Détruit une pièce ainsi que tout ce qui ne tient plus sans elle.
+   * Renvoie le nombre total de pièces retirées.
+   */
+  destroy(key: string): number {
+    if (!this.pieces.has(key)) return 0
+    const removed = [key, ...this.structure.remove(key)]
+    for (const k of removed) this.removeVisual(this.pieces.get(k)!)
+    return removed.length
+  }
+
+  /** Détruit la pièce touchée par le rayon (et ce qu'elle soutient). Renvoie le nombre de pièces retirées. */
   destroyAlongRay(origin: THREE.Vector3, dir: THREE.Vector3, maxDistance: number, ignore: RAPIER.Collider) {
     this.ray.origin = origin
     this.ray.dir = dir
     const hit = this.physics.castRay(this.ray, maxDistance, true, undefined, undefined, ignore)
     const piece = hit && this.byCollider.get(hit.collider.handle)
-    if (!piece) return false
-    this.remove(piece)
-    return true
+    return piece ? this.destroy(piece.spec.key) : 0
   }
 
   /** Surface praticable de `spec` sous le point (x, z), ou `null`. */
@@ -131,7 +145,8 @@ export class BuildSystem {
   }
 
   clear() {
-    for (const piece of [...this.pieces.values()]) this.remove(piece)
+    for (const piece of [...this.pieces.values()]) this.removeVisual(piece)
+    this.structure.clear()
   }
 
   dispose() {
@@ -151,7 +166,8 @@ export class BuildSystem {
     this.ghostMaterial.color.set(preview.valid ? GHOST_VALID : GHOST_INVALID)
   }
 
-  private remove(piece: Piece) {
+  /** Retire le mesh et le collider (le graphe de structure est géré par l'appelant). */
+  private removeVisual(piece: Piece) {
     this.scene.remove(piece.mesh)
     this.byCollider.delete(piece.collider.handle)
     const body = piece.collider.parent()
@@ -163,6 +179,8 @@ export class BuildSystem {
     if (this.pieces.has(spec.key) || spec.level < 0) return false
     const limit = CONFIG.world.halfSize
     if (Math.abs(spec.x) > limit || Math.abs(spec.z) > limit) return false
+    // Une pièce doit toucher le sol ou une construction déjà reliée au sol.
+    if (!this.structure.isSupported(spec)) return false
     // Un mur ne peut pas traverser le joueur (sols et rampes le remontent dessus).
     return spec.type !== 'wall' || !wallOverlapsPlayer(spec, playerFeet)
   }

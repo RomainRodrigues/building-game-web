@@ -22,7 +22,9 @@ Puis ouvrir http://localhost:3000 → **Free Build** → cliquer pour verrouille
 | Détruire la pièce visée | Clic droit |
 | Pause | Échap |
 
-Astuce : regarder vers le haut / bas change l'étage du sol et du mur. Rampe + avancer en
+Astuce : regarder vers le haut / bas change l'étage du sol et du mur. Une pièce doit être
+reliée au sol (directement ou via d'autres pièces) : sinon l'aperçu est rouge, et détruire
+un support fait s'effondrer tout ce qu'il portait. Rampe + avancer en
 maintenant le clic = "ramp rush".
 
 ## Scripts
@@ -64,6 +66,7 @@ app/
     world/                  ciel, lumière, sol, décor, textures procédurales
     player/                 joueur (Rapier), caméra 3e personne, avatar
     build/BuildGrid.ts      règles de la grille (PURES, testées, partageables avec un serveur)
+    build/Structure.ts      intégrité structurelle : appuis et effondrements (PURE, testée)
     build/BuildSystem.ts    aperçu, pose, destruction des pièces
     utils/random.ts         aléatoire déterministe (carte identique à chaque partie)
 tests/unit/                 tests Vitest de la logique pure
@@ -77,7 +80,7 @@ Principes :
    quel que soit l'écran (60/144 Hz).
 3. **Entrées → commande → simulation** (`PlayerCommand`) : c'est exactement le format qu'on
    enverrait à un serveur si on ajoute un multijoueur un jour.
-4. **Logique pure séparée du rendu** (`BuildGrid`, `Loop`, `random`) : testable sans navigateur.
+4. **Logique pure séparée du rendu** (`BuildGrid`, `Structure`, `Loop`, `random`) : testable sans navigateur.
 5. **Zéro allocation par tick** dans les chemins chauds (vecteurs et rayons réutilisés),
    et chaque système libère ses ressources GPU dans `dispose()`.
 
@@ -89,8 +92,8 @@ En dev, le jeu est accessible dans la console via `window.__game`.
 - [x] Phase 1 : personnage 3e personne, caméra par-dessus l'épaule anti-collision
 - [x] Qualité : ESLint, Vitest, CI GitHub Actions
 - [x] Phase 3 (base) : mur / sol / rampe sur grille, aperçu, turbo build, destruction
+- [x] Intégrité structurelle : pièces obligatoirement reliées au sol, effondrements
 - [ ] Toit (pyramide), édition de pièces, matériaux (bois / pierre / métal) et PV visibles
-- [ ] Intégrité structurelle (les pièces non reliées au sol s'effondrent)
 - [ ] Armes (hitscan), cibles d'entraînement, bot simple
 - [ ] Vrai modèle animé (glTF + Mixamo), sons, particules
 - [ ] Passer à `@dimforge/rapier3d` (vrai fichier `.wasm`, ~30 % plus léger que la version base64)
