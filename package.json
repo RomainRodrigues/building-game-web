@@ -8,7 +8,12 @@
     "build": "nuxt build",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "typecheck": "nuxt typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
     "postinstall": "nuxt prepare"
   },
   "pnpm": {
@@ -26,8 +31,11 @@
     "vue-router": "^5.4.0"
   },
   "devDependencies": {
+    "@nuxt/eslint": "^1.17.0",
     "@types/three": "^0.187.0",
+    "eslint": "^10.14.0",
     "typescript": "^5.9.3",
+    "vitest": "^5.0.5",
     "vue-tsc": "^3.3.14"
   }
 }
