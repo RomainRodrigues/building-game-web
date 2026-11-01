@@ -200,13 +200,15 @@ export function computePlacement(type: PieceType, viewer: Viewer, rampAt: RampLo
   const currentRamp = rampAt(cx, level, cz)
   const climbing = currentRamp?.dir === dir && viewer.feetY > level * H + ON_RAMP_MIN_HEIGHT
   if (climbing) {
-    // Sur une rampe qui monte dans le sens du regard : la pièce suivante va
-    // dans la case suivante, un étage plus haut.
+    // Sur une rampe qui monte dans le sens du regard ("ramp rush") :
+    //  - rampe / sol : dans la case suivante, un étage plus haut (prolongent la montée) ;
+    //  - mur : debout sur le bord haut de la rampe actuelle, pour protéger la montée.
+    // Dans les trois cas la pièce partage le bord haut de la rampe : elle est soutenue.
     const nx = cx + fx
     const nz = cz + fz
     if (type === 'ramp') return rampSpec(nx, level + 1, nz, dir)
     if (type === 'floor') return floorSpec(nx, level + 1, nz)
-    return wallSpec(nx, level + 1, nz, dir)
+    return wallSpec(cx, level + 1, cz, dir)
   }
 
   // Case "devant" : celle qui contient un point situé un peu devant le joueur.

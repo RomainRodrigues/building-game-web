@@ -13,6 +13,7 @@ import {
   type PieceSpec,
   type Viewer,
 } from '../../app/game/build/BuildGrid'
+import { StructureGraph } from '../../app/game/build/Structure'
 
 const T = CONFIG.build.tile
 const H = CONFIG.build.height
@@ -127,6 +128,32 @@ describe('computePlacement', () => {
     const onRamp = viewer(0, -1, { feetY: H / 2 })
     const next = computePlacement('ramp', onRamp, rampAt)
     expect(next.key).toBe(rampSpec(0, 1, -2, 0).key)
+  })
+
+  describe('sur une rampe qui monte dans le sens du regard', () => {
+    const current = rampSpec(0, 0, -1, 0)
+    const rampAt = (cx: number, level: number, cz: number): PieceSpec | undefined =>
+      cx === 0 && level === 0 && cz === -1 ? current : undefined
+    const onRamp = viewer(0, -1, { feetY: H / 2 })
+
+    it('pose le mur sur le bord haut de la rampe, pas dans la case suivante', () => {
+      const wall = computePlacement('wall', onRamp, rampAt)
+      expect(wall.key).toBe(wallSpec(0, 1, -1, 0).key)
+      // Le bas du mur est exactement au sommet de la rampe.
+      expect(wall.y - wall.sy / 2).toBeCloseTo(H)
+    })
+
+    it('prolonge la montée avec un sol au sommet de la rampe', () => {
+      expect(computePlacement('floor', onRamp, rampAt).key).toBe(floorSpec(0, 1, -2).key)
+    })
+
+    it('pose des pièces reliées à la rampe (donc constructibles)', () => {
+      const graph = new StructureGraph()
+      graph.add(current)
+      for (const type of ['wall', 'floor', 'ramp'] as const) {
+        expect(graph.isSupported(computePlacement(type, onRamp, rampAt))).toBe(true)
+      }
+    })
   })
 
   it('n\'enchaîne pas si la rampe monte dans une autre direction', () => {
