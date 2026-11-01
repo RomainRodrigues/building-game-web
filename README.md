@@ -22,11 +22,12 @@ Puis ouvrir http://localhost:3000 → **Free Build** → cliquer pour verrouille
 | Détruire la pièce visée | Clic droit |
 | Pause | Échap |
 
-Astuce : la pièce se pose là où vise le réticule (sur ta case ou une case voisine, à ton
-étage ou un étage plus haut ou plus bas). Vise le sol pour poser au sol, vise plus haut pour
-monter, vise au-dessus d'un mur pour construire derrière. Une pièce doit être reliée au sol
-(directement ou via d'autres pièces) : sinon l'aperçu est rouge, et détruire un support fait
-s'effondrer tout ce qu'il portait. Rampe + avancer en maintenant le clic = "ramp rush".
+Astuce : la pièce se pose là où vise le réticule. Vise le sol pour poser au sol, vise plus
+haut pour monter, vise au-dessus d'un mur pour construire derrière. Une pièce doit être
+reliée au sol, sinon l'aperçu est rouge.
+
+Le fonctionnement complet des constructions (grille, emplacements, placement, appuis,
+effondrements) est décrit dans [`docs/construction.md`](docs/construction.md).
 
 ## Scripts
 

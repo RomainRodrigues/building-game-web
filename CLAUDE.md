@@ -24,6 +24,12 @@ pnpm build        # build de production
 - pnpm est épinglé via `packageManager` dans `package.json` : ne pas utiliser npm/yarn.
 - TypeScript est épinglé en `^5` : `vue-tsc` ne supporte pas encore TypeScript 7.
 
+## Documentation
+
+- `docs/construction.md` : référence du système de construction (grille, emplacements,
+  placement au réticule, appuis, effondrements). **Toute modification des règles de
+  construction doit mettre ce document à jour**, dans le même commit que le code et les tests.
+
 ## Architecture
 
 - `app/game/` : moteur en TypeScript pur. **N'importe jamais Vue ni Nuxt** (seule
