@@ -29,6 +29,12 @@ const SLOPE_EPSILON = 1e-3
 const SLOPE_MIN_RATIO = 0.95
 /** Échelle de temps du contrôle aérien (réactivité à 1/10 s). */
 const AIR_CONTROL_RATE = 10
+/**
+ * Jeu laissé sous les pieds à l'apparition. Le character controller de Rapier
+ * ne sait pas sortir d'une pénétration : un joueur posé pile au contact du sol
+ * (à la marge `controllerOffset` près) peut s'enfoncer à travers.
+ */
+const SPAWN_CLEARANCE = 0.1
 
 /**
  * Joueur piloté par le "kinematic character controller" de Rapier :
@@ -57,8 +63,7 @@ export class Player {
 
   constructor(scene: THREE.Scene, rapier: RapierModule, physics: RAPIER.World, spawnFeet: THREE.Vector3) {
     this.spawn = spawnFeet.clone()
-    this.position.set(spawnFeet.x, spawnFeet.y + HALF_HEIGHT, spawnFeet.z)
-    this.previous.copy(this.position)
+    this.placeAtSpawn()
 
     this.body = physics.createRigidBody(
       rapier.RigidBodyDesc.kinematicPositionBased().setTranslation(this.position.x, this.position.y, this.position.z),
@@ -124,9 +129,14 @@ export class Player {
   }
 
   respawn() {
-    this.position.set(this.spawn.x, this.spawn.y + HALF_HEIGHT, this.spawn.z)
-    this.previous.copy(this.position)
+    this.placeAtSpawn()
     this.velocity.set(0, 0, 0)
+    this.body.setNextKinematicTranslation(this.position)
+  }
+
+  private placeAtSpawn() {
+    this.position.set(this.spawn.x, this.spawn.y + SPAWN_CLEARANCE + HALF_HEIGHT, this.spawn.z)
+    this.previous.copy(this.position)
   }
 
   /** Vitesse horizontale voulue, relative à l'orientation de la visée. */
