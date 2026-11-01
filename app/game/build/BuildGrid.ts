@@ -82,8 +82,9 @@ const TILE_REACH = 1
 /** On ne construit qu'à un étage près autour de celui du joueur. */
 const LEVEL_REACH = 1
 /**
- * Sols et rampes passent à l'étage supérieur quand le point visé dépasse les
- * 3/4 de l'étage courant : regarder un peu vers le haut ne suffit pas.
+ * Sols, toits et rampes (pièces posées sur une limite d'étage) passent à l'étage
+ * supérieur quand le point visé dépasse les 3/4 de l'étage courant : regarder un
+ * peu vers le haut ne suffit pas, mais sur une rampe on bascule vite au-dessus.
  */
 const UPPER_LEVEL_FRACTION = 0.75
 
@@ -258,8 +259,10 @@ export function walkableSurfaceY(spec: PieceSpec, x: number, z: number): number 
  * Choisit l'emplacement de la pièce à poser à partir du POINT VISÉ au réticule,
  * comme dans les jeux du genre :
  *  - la case est celle qui contient le point visé (bornée aux cases voisines) ;
- *  - l'étage dépend de la hauteur du point visé (borné à un étage près) ;
- *  - sol / toit : sur la case visée, au sol compris ;
+ *  - l'étage dépend de la hauteur du point visé (borné à un étage près), avec la
+ *    même règle pour toutes les pièces posées sur une limite d'étage (sol, toit, rampe) ;
+ *  - sol / toit : sur la case visée, au sol compris ; un toit visé sur une rampe
+ *    se pose au-dessus d'elle ;
  *  - rampe : sur la case visée, montant dans le sens du regard ; si une rampe
  *    montant dans le même sens y est déjà, la nouvelle la prolonge ;
  *  - mur : sur le bord de case, perpendiculaire au regard, le plus proche du point visé.
@@ -281,9 +284,13 @@ export function computePlacement(type: PieceType, aim: BuildAim, lookup: PieceLo
   switch (type) {
     case 'floor':
       return floorSpec(cx, level(surfaceLevel(aim.target.y)), cz)
-    case 'roof':
-      // La base du toit est sous le point visé : viser le sol le pose au sol.
-      return roofSpec(cx, level(Math.floor(aim.target.y / H)), cz)
+    case 'roof': {
+      // La base d'un toit se pose comme un sol : même règle d'étage.
+      const target = roofSpec(cx, level(surfaceLevel(aim.target.y)), cz)
+      // Le volume visé contient déjà une rampe : le toit se pose au-dessus d'elle.
+      if (lookup(target.key)?.type !== 'ramp') return target
+      return roofSpec(cx, target.level + 1, cz)
+    }
     case 'ramp': {
       const target = rampSpec(cx, level(surfaceLevel(aim.target.y)), cz, dir)
       const existing = lookup(target.key)
@@ -331,7 +338,7 @@ function wallFacing(dir: Dir, x: number, z: number, feet: Vec3, level: number): 
   return forward > 0 ? wallSpec(cx, level, line - 1, 2) : wallSpec(cx, level, line, 0)
 }
 
-/** Étage d'un sol ou du bas d'une rampe pour un point visé à la hauteur `y`. */
+/** Étage d'un sol, de la base d'un toit ou du bas d'une rampe, pour un point visé à la hauteur `y`. */
 function surfaceLevel(y: number) {
   return Math.floor(y / H + 1 - UPPER_LEVEL_FRACTION)
 }

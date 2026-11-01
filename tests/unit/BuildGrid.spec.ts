@@ -173,6 +173,22 @@ describe('computePlacement', () => {
       expect(computePlacement('roof', aim({ x: 2.5, y: 5, z: 2.5 }), empty).key).toBe(roofSpec(0, 1, 0).key)
     })
 
+    it('suivent la même règle d\'étage : sur une rampe, ils passent au-dessus de la tête', () => {
+      const onRamp = aim({ x: 2.5, y: 3.2, z: -2 }, { feet: { x: 2.5, y: 2, z: -2.5 } })
+      const ramp = rampSpec(0, 0, -1, 0)
+      expect(computePlacement('floor', onRamp, world(ramp)).key).toBe(floorSpec(0, 1, -1).key)
+      expect(computePlacement('roof', onRamp, world(ramp)).key).toBe(roofSpec(0, 1, -1).key)
+    })
+
+    it('posent le toit au-dessus d\'une rampe visée, relié à elle', () => {
+      const ramp = rampSpec(0, 0, -1, 0)
+      const roof = computePlacement('roof', aim({ x: 2.5, y: 1, z: -2.5 }), world(ramp))
+      expect(roof.key).toBe(roofSpec(0, 1, -1).key)
+      const graph = new StructureGraph()
+      graph.add(ramp)
+      expect(graph.isSupported(roof)).toBe(true)
+    })
+
     it('permettent de poser un toit par-dessus un mur, dans la case derrière', () => {
       expect(computePlacement('roof', aim({ x: 2.5, y: 4.5, z: -1 }), empty).key).toBe(roofSpec(0, 1, -1).key)
     })

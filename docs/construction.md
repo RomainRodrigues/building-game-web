@@ -82,9 +82,11 @@ dernière frame.
    une de ses 8 voisines (`TILE_REACH = 1`).
 2. **Étage** : déduit de la hauteur du point visé, puis borné à un étage près autour de
    celui du joueur (`LEVEL_REACH = 1`), et jamais sous le sol.
-   - Mur et toit : l'étage qui **contient** le point visé (`floor(y / 4)`).
-   - Sol et rampe : on ne passe à l'étage supérieur qu'au-delà des 3/4 de l'étage
-     (`UPPER_LEVEL_FRACTION`). Regarder à peine vers le haut ne suffit pas.
+   - Mur : l'étage qui **contient** le point visé (`floor(y / 4)`).
+   - Sol, toit et rampe (pièces posées sur une limite d'étage) : on ne passe à l'étage
+     supérieur qu'au-delà des 3/4 de l'étage (`UPPER_LEVEL_FRACTION`). Au sol, regarder
+     à peine vers le haut ne suffit pas ; sur une rampe, on est déjà haut, donc ils
+     basculent vite au-dessus de la tête.
 3. **Étage du joueur** : celui de ses pieds, avec 0,3 m de tolérance (`levelOf`). Un
    joueur debout sur un sol compte bien à l'étage de ce sol.
 
@@ -93,7 +95,7 @@ dernière frame.
 | Pièce | Règle |
 |---|---|
 | Sol | Sur la case visée, au sol compris. |
-| Toit | Sur la case visée, au sol compris (pour occuper une case) ou en hauteur (au-dessus d'une boîte, par-dessus un mur). |
+| Toit | Sur la case visée, au sol compris (pour occuper une case) ou en hauteur (au-dessus d'une boîte, par-dessus un mur). Si la case visée contient déjà une rampe à cet étage, le toit se pose **au-dessus de la rampe** (il repose sur son bord haut). |
 | Rampe | Sur la case visée, **montant dans le sens du regard**. Si une rampe montant dans le même sens occupe déjà la case, la nouvelle la **prolonge** : case suivante, un étage plus haut. |
 | Mur | Perpendiculaire au regard, sur la ligne de grille la plus proche du point visé, **jamais derrière le joueur**. À distance égale, la ligne la plus proche du joueur l'emporte. |
 
@@ -108,6 +110,7 @@ dernière frame.
 | Viser au-dessus d'un mur | Toit / sol dans la case **derrière** le mur, à l'étage du dessus |
 | Sur une rampe, viser devant | Mur au **bout** de la rampe, au même étage (la rampe s'appuie contre lui) |
 | Sur une rampe, viser haut (ou sauter) | Mur au-dessus de la rampe |
+| Sur une rampe, sol ou toit | Au-dessus de la tête (l'étage du dessus), dès qu'on est un peu monté |
 | Avancer en maintenant le clic, rampe en main ("ramp rush") | Chaque rampe prolonge la précédente : environ 4 m de montée par seconde |
 | Dans une boîte de 4 murs, regarder vers le haut | Toit sur la boîte (en regardant presque à la verticale, sinon le rayon passe par-dessus le mur avant) |
 
