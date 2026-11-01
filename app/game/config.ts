@@ -77,11 +77,13 @@ export const CONFIG = {
     height: 4,
     /** Épaisseur des pièces. */
     thickness: 0.2,
+    /** Hauteur de la pyramide d'un toit (pente ~39° : on peut marcher dessus). */
+    roofHeight: 2,
     /** Délai entre deux poses quand on maintient le clic (turbo build). */
     turboDelay: 0.08,
     /** Portée max pour détruire une pièce, depuis le joueur. */
     editRange: 12,
-    hp: { wall: 150, floor: 140, ramp: 140 },
+    hp: { wall: 150, floor: 140, ramp: 140, roof: 140 },
   },
 
   hud: {

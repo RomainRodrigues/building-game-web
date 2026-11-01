@@ -8,6 +8,7 @@ const slots = [
   { type: 'wall', key: '1', label: 'Mur' },
   { type: 'floor', key: '2', label: 'Sol' },
   { type: 'ramp', key: '3', label: 'Rampe' },
+  { type: 'roof', key: '4', label: 'Toit' },
 ] as const
 
 const paused = computed(() => !props.hud.locked)
@@ -61,7 +62,7 @@ const paused = computed(() => !props.hud.locked)
         <ul class="controls">
           <li><b>ZQSD / WASD</b> se déplacer · <b>Espace</b> sauter · <b>Maj</b> sprint</li>
           <li><b>Souris</b> viser · <b>Clic gauche</b> construire (maintenir = turbo)</li>
-          <li><b>1 / 2 / 3</b> ou <b>molette</b> : mur / sol / rampe · <b>X</b> ranger</li>
+          <li><b>1 / 2 / 3 / 4</b> ou <b>molette</b> : mur / sol / rampe / toit · <b>X</b> ranger</li>
           <li><b>Clic droit</b> détruire la pièce visée · <b>Échap</b> pause</li>
           <li class="hint">
             Regarder vers le haut / bas change l'étage du sol et du mur. Une pièce doit

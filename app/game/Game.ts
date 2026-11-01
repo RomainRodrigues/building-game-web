@@ -22,6 +22,7 @@ const PIECE_SELECTION: Partial<Record<Action, PieceType>> = {
   selectWall: 'wall',
   selectFloor: 'floor',
   selectRamp: 'ramp',
+  selectRoof: 'roof',
 }
 
 /**

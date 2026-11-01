@@ -7,17 +7,18 @@
  *
  *  - floor : dalle horizontale couvrant une case, à la base d'un étage ;
  *  - wall  : mur vertical posé sur une ARÊTE entre deux cases ;
- *  - ramp  : rampe à 45° couvrant une case et montant d'un étage.
+ *  - ramp  : rampe couvrant une case et montant d'un étage ;
+ *  - roof  : toit en pyramide couvrant une case, posé au sommet d'un étage.
  *
  * Directions (alignées sur le "yaw" de la caméra) :
  *   0 = nord (-Z), 1 = ouest (-X), 2 = sud (+Z), 3 = est (+X)
  */
 import { CONFIG } from '../config'
 
-export type PieceType = 'wall' | 'floor' | 'ramp'
+export type PieceType = 'wall' | 'floor' | 'ramp' | 'roof'
 export type Dir = 0 | 1 | 2 | 3
 
-export const PIECE_TYPES: readonly PieceType[] = ['wall', 'floor', 'ramp']
+export const PIECE_TYPES: readonly PieceType[] = ['wall', 'floor', 'ramp', 'roof']
 
 /** Description complète (et sérialisable) d'une pièce posée sur la grille. */
 export interface PieceSpec {
@@ -57,6 +58,7 @@ export type PieceLookup = (key: string) => PieceSpec | undefined
 const T = CONFIG.build.tile
 const H = CONFIG.build.height
 const TH = CONFIG.build.thickness
+const ROOF_H = CONFIG.build.roofHeight
 const QUARTER_TURN = Math.PI / 2
 
 /** Marge pour qu'un joueur posé sur un sol soit compté à l'étage de ce sol. */
@@ -191,6 +193,27 @@ export function liftHeightAfterPlacing(
   return surface > feet.y && surface < feet.y + playerHeight ? surface : null
 }
 
+/**
+ * Toit en pyramide sur la case (cx, cz), base à la hauteur de l'étage `level`.
+ * Il peut coexister avec un sol dans la même case (clés distinctes).
+ */
+export function roofSpec(cx: number, level: number, cz: number): PieceSpec {
+  return {
+    type: 'roof',
+    key: `roof:${cx}:${level}:${cz}`,
+    x: cx * T + T / 2,
+    y: level * H + ROOF_H / 2,
+    z: cz * T + T / 2,
+    sx: T,
+    sy: ROOF_H,
+    sz: T,
+    pitch: 0,
+    yaw: 0,
+    level,
+    dir: 0,
+  }
+}
+
 /** Hauteur de la ligne médiane d'une rampe au point (x, z). */
 export function rampMidlineY(spec: PieceSpec, x: number, z: number) {
   const [dx, dz] = DIR_VEC[spec.dir]
@@ -208,6 +231,11 @@ export function walkableSurfaceY(spec: PieceSpec, x: number, z: number): number 
   if (Math.abs(x - spec.x) > half || Math.abs(z - spec.z) > half) return null
   if (spec.type === 'floor') return spec.y + spec.sy / 2
   if (spec.type === 'ramp') return rampMidlineY(spec, x, z) + spec.sy
+  if (spec.type === 'roof') {
+    // Pyramide : la hauteur décroît linéairement du sommet vers le bord le plus proche.
+    const fromCenter = Math.max(Math.abs(x - spec.x), Math.abs(z - spec.z)) / half
+    return spec.level * H + spec.sy * (1 - fromCenter)
+  }
   return null
 }
 
@@ -216,7 +244,8 @@ export function walkableSurfaceY(spec: PieceSpec, x: number, z: number): number 
  * joueur, en tenant compte des pièces existantes (`lookup`) :
  *  - sur une rampe qui monte dans le sens du regard, les pièces prolongent la montée ;
  *  - face à un mur, rampes et sols se construisent dans la case du joueur ;
- *  - une rampe visée là où il y en a déjà une dans le même sens la prolonge.
+ *  - une rampe visée là où il y en a déjà une dans le même sens la prolonge ;
+ *  - un toit se pose toujours au-dessus du joueur, au sommet de son étage.
  */
 export function computePlacement(type: PieceType, viewer: Viewer, lookup: PieceLookup): PieceSpec {
   const dir = yawToDir(viewer.yaw)
@@ -232,6 +261,7 @@ export function computePlacement(type: PieceType, viewer: Viewer, lookup: PieceL
     // Dans tous les cas la pièce partage le bord haut de la rampe : elle est soutenue.
     if (type === 'ramp') return rampSpec(cx + fx, level + 1, cz + fz, dir)
     if (type === 'floor') return floorSpec(cx + fx, level + 1, cz + fz)
+    if (type === 'roof') return roofSpec(cx, level + 1, cz)
     const above = viewer.airborne || viewer.pitch > PITCH_WALL_UP
     return wallSpec(cx, above ? level + 1 : level, cz, dir)
   }
@@ -253,6 +283,9 @@ export function computePlacement(type: PieceType, viewer: Viewer, lookup: PieceL
       if (viewer.pitch < PITCH_FLOOR_DOWN) return floorSpec(cx, level, cz)
       if (viewer.pitch > PITCH_FLOOR_UP) return floorSpec(cx, level + 1, cz)
       return floorSpec(ax, level, az)
+    case 'roof':
+      // Toujours au-dessus du joueur, au sommet de son étage (sur ses murs).
+      return roofSpec(cx, level + 1, cz)
     case 'ramp': {
       const target = rampSpec(ax, level, az, dir)
       // Une rampe existe déjà ici dans le même sens : on la prolonge d'une case.

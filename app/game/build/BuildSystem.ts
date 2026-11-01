@@ -21,6 +21,7 @@ const PIECE_COLORS: Record<PieceType, string> = {
   wall: '#e0b07a',
   floor: '#d39a5c',
   ramp: '#c98d4f',
+  roof: '#b9773f',
 }
 const GHOST_VALID = '#4fc3ff'
 const GHOST_INVALID = '#ff4f5e'
@@ -30,7 +31,7 @@ const GHOST_RENDER_ORDER = 10
 
 /**
  * Pose, aperçu ("fantôme") et destruction des constructions.
- * Chaque pièce = un mesh (cube unitaire mis à l'échelle) + un collider Rapier fixe.
+ * Chaque pièce = un mesh (forme unitaire mise à l'échelle) + un collider Rapier fixe.
  * Les règles d'appui (pièces reliées au sol, effondrements) sont déléguées à `StructureGraph`.
  */
 export class BuildSystem {
@@ -38,6 +39,14 @@ export class BuildSystem {
   private readonly byCollider = new Map<number, Piece>()
   private readonly structure = new StructureGraph()
   private readonly box = new THREE.BoxGeometry(1, 1, 1)
+  private readonly pyramid = createUnitPyramid()
+  private readonly geometries: Record<PieceType, THREE.BufferGeometry> = {
+    wall: this.box,
+    floor: this.box,
+    ramp: this.box,
+    roof: this.pyramid,
+  }
+
   private readonly texture = createPlankTexture()
   private readonly materials: Record<PieceType, THREE.MeshStandardMaterial>
   private readonly ghostMaterial: THREE.MeshBasicMaterial
@@ -52,7 +61,7 @@ export class BuildSystem {
   ) {
     const material = (type: PieceType) =>
       new THREE.MeshStandardMaterial({ map: this.texture, color: PIECE_COLORS[type], roughness: 0.85 })
-    this.materials = { wall: material('wall'), floor: material('floor'), ramp: material('ramp') }
+    this.materials = { wall: material('wall'), floor: material('floor'), ramp: material('ramp'), roof: material('roof') }
 
     this.ghostMaterial = new THREE.MeshBasicMaterial({
       color: GHOST_VALID,
@@ -97,7 +106,7 @@ export class BuildSystem {
   /** Pose une pièce si elle est soutenue. Renvoie `false` sinon. */
   place(spec: PieceSpec): boolean {
     if (this.pieces.has(spec.key) || !this.structure.isSupported(spec)) return false
-    const mesh = new THREE.Mesh(this.box, this.materials[spec.type])
+    const mesh = new THREE.Mesh(this.geometries[spec.type], this.materials[spec.type])
     applyTransform(mesh, spec)
     mesh.castShadow = true
     mesh.receiveShadow = true
@@ -107,10 +116,7 @@ export class BuildSystem {
     const body = this.physics.createRigidBody(
       this.rapier.RigidBodyDesc.fixed().setTranslation(spec.x, spec.y, spec.z).setRotation({ x, y, z, w }),
     )
-    const collider = this.physics.createCollider(
-      this.rapier.ColliderDesc.cuboid(spec.sx / 2, spec.sy / 2, spec.sz / 2),
-      body,
-    )
+    const collider = this.physics.createCollider(this.colliderShape(spec), body)
 
     const piece: Piece = { spec, mesh, collider, hp: CONFIG.build.hp[spec.type] }
     this.pieces.set(spec.key, piece)
@@ -148,6 +154,7 @@ export class BuildSystem {
     this.clear()
     this.scene.remove(this.ghost)
     this.box.dispose()
+    this.pyramid.dispose()
     this.texture.dispose()
     for (const material of Object.values(this.materials)) material.dispose()
     this.ghostMaterial.dispose()
@@ -157,8 +164,22 @@ export class BuildSystem {
     this._preview = preview
     this.ghost.visible = preview !== null
     if (!preview) return
+    this.ghost.geometry = this.geometries[preview.spec.type]
     applyTransform(this.ghost, preview.spec)
     this.ghostMaterial.color.set(preview.valid ? GHOST_VALID : GHOST_INVALID)
+  }
+
+  /** Forme de collision d'une pièce, dans son repère local (avant rotation). */
+  private colliderShape(spec: PieceSpec): RAPIER.ColliderDesc {
+    const hx = spec.sx / 2
+    const hy = spec.sy / 2
+    const hz = spec.sz / 2
+    if (spec.type !== 'roof') return this.rapier.ColliderDesc.cuboid(hx, hy, hz)
+    // Pyramide : enveloppe convexe des 4 coins de la base et du sommet.
+    const points = new Float32Array([-hx, -hy, -hz, hx, -hy, -hz, hx, -hy, hz, -hx, -hy, hz, 0, hy, 0])
+    const hull = this.rapier.ColliderDesc.convexHull(points)
+    if (!hull) throw new Error(`Impossible de créer le collider du toit ${spec.key}`)
+    return hull
   }
 
   /** Retire le mesh et le collider (le graphe de structure est géré par l'appelant). */
@@ -188,6 +209,19 @@ function wallOverlapsPlayer(spec: PieceSpec, feet: THREE.Vector3) {
   const overlapZ = Math.abs(feet.z - spec.z) < radius + spec.sz / 2
   const overlapY = feet.y < spec.y + spec.sy / 2 && feet.y + height > spec.y - spec.sy / 2
   return overlapX && overlapY && overlapZ
+}
+
+/**
+ * Pyramide à base carrée de côté 1 et de hauteur 1, centrée sur l'origine
+ * (comme le cube unitaire), avec des faces planes.
+ */
+function createUnitPyramid() {
+  // Un cône à 4 segments a ses sommets sur les axes : on le tourne de 45°
+  // pour aligner la base sur la grille (rayon 1/√2 => côté 1).
+  const geometry = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1).toNonIndexed()
+  geometry.rotateY(Math.PI / 4)
+  geometry.computeVertexNormals()
+  return geometry
 }
 
 function applyTransform(mesh: THREE.Mesh, spec: PieceSpec) {

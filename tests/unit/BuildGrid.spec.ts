@@ -8,6 +8,7 @@ import {
   liftHeightAfterPlacing,
   rampMidlineY,
   rampSpec,
+  roofSpec,
   walkableSurfaceY,
   wallSpec,
   yawToDir,
@@ -107,6 +108,22 @@ describe('walkableSurfaceY', () => {
   })
 })
 
+describe('roofSpec', () => {
+  it('pose la base au sommet de l\'étage et a une clé distincte du sol', () => {
+    const roof = roofSpec(0, 1, 0)
+    expect(roof.y - roof.sy / 2).toBeCloseTo(H)
+    expect(roof.key).not.toBe(floorSpec(0, 1, 0).key)
+  })
+
+  it('a une surface en pyramide : sommet au centre, base sur les bords', () => {
+    const roof = roofSpec(0, 1, 0)
+    const ROOF_H = CONFIG.build.roofHeight
+    expect(walkableSurfaceY(roof, roof.x, roof.z)).toBeCloseTo(H + ROOF_H)
+    expect(walkableSurfaceY(roof, roof.x + T / 2, roof.z)).toBeCloseTo(H)
+    expect(walkableSurfaceY(roof, roof.x + T / 4, roof.z - T / 4)).toBeCloseTo(H + ROOF_H / 2)
+  })
+})
+
 describe('liftHeightAfterPlacing', () => {
   const height = CONFIG.player.height
   const ramp = rampSpec(0, 0, 0, 0) // monte vers -Z, de z = T (bas) à z = 0 (haut)
@@ -157,6 +174,11 @@ describe('computePlacement', () => {
     const spec = computePlacement('ramp', viewer(0, 0), empty)
     expect(spec.key).toBe(rampSpec(0, 0, -1, 0).key)
     expect(spec.dir).toBe(0)
+  })
+
+  it('pose le toit au-dessus du joueur, au sommet de son étage', () => {
+    expect(computePlacement('roof', viewer(0, 0), empty).key).toBe(roofSpec(0, 1, 0).key)
+    expect(computePlacement('roof', viewer(0, 0, { feetY: H, pitch: -1 }), empty).key).toBe(roofSpec(0, 2, 0).key)
   })
 
   describe('face à un mur', () => {

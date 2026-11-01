@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { floorSpec, rampSpec, wallSpec } from '../../app/game/build/BuildGrid'
+import { floorSpec, rampSpec, roofSpec, wallSpec } from '../../app/game/build/BuildGrid'
 import { isAnchored, jointsOf, StructureGraph } from '../../app/game/build/Structure'
 
 const shareJoint = (a: string[], b: string[]) => a.some((joint) => b.includes(joint))
@@ -39,6 +39,13 @@ describe('jointsOf', () => {
     expect(shareJoint(jointsOf(ramp), jointsOf(rampSpec(1, 1, 0, 1)))).toBe(false)
   })
 
+  it('relie un toit au haut des murs et au sommet d\'une rampe', () => {
+    const roof = roofSpec(0, 1, 0)
+    expect(shareJoint(jointsOf(roof), jointsOf(wallSpec(0, 0, 0, 0)))).toBe(true)
+    expect(shareJoint(jointsOf(roof), jointsOf(rampSpec(0, 0, 1, 0)))).toBe(true)
+    expect(shareJoint(jointsOf(roof), jointsOf(floorSpec(0, 1, 0)))).toBe(true)
+  })
+
   it('ne relie pas deux sols éloignés ni deux sols d\'étages différents', () => {
     expect(shareJoint(jointsOf(floorSpec(0, 1, 0)), jointsOf(floorSpec(2, 1, 0)))).toBe(false)
     expect(shareJoint(jointsOf(floorSpec(0, 1, 0)), jointsOf(floorSpec(0, 2, 0)))).toBe(false)
@@ -70,6 +77,13 @@ describe('StructureGraph', () => {
     graph.add(wallSpec(0, 0, 0, 0))
     expect(graph.isSupported(floorSpec(0, 1, 0))).toBe(true)
     expect(graph.isSupported(floorSpec(0, 1, -1))).toBe(true)
+  })
+
+  it('refuse un toit sans murs et l\'accepte sur une boîte de murs', () => {
+    const roof = roofSpec(0, 1, 0)
+    expect(graph.isSupported(roof)).toBe(false)
+    graph.add(wallSpec(0, 0, 0, 0))
+    expect(graph.isSupported(roof)).toBe(true)
   })
 
   it('fait s\'effondrer ce qui ne tient plus quand on retire le support', () => {

@@ -3,8 +3,8 @@
  *
  * Chaque pièce occupe des "jointures" de la grille, et deux pièces sont connectées
  * si elles en partagent une. Un simple contact par un coin ne suffit jamais.
- *  - arêtes horizontales (bord d'une case, à la hauteur d'un étage) : sols, murs, bords
- *    bas et haut des rampes ;
+ *  - arêtes horizontales (bord d'une case, à la hauteur d'un étage) : sols, toits, murs,
+ *    bords bas et haut des rampes ;
  *  - poteaux verticaux (coin d'une case, sur un étage) : murs entre eux ;
  *  - diagonales (côté d'une rampe, sur la face verticale d'une frontière) : partagées par
  *    deux rampes parallèles montant dans le même sens, et par le mur posé sur cette face.
@@ -40,7 +40,9 @@ const boundaryIndex = (coordinate: number) => Math.round(coordinate / T)
 export function jointsOf(spec: PieceSpec): string[] {
   const level = spec.level
   switch (spec.type) {
-    case 'floor': {
+    case 'floor':
+    case 'roof': {
+      // Le pourtour de la base : un toit se pose sur des murs comme un sol.
       const cx = cellIndex(spec.x)
       const cz = cellIndex(spec.z)
       return [

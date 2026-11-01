@@ -17,7 +17,7 @@ Puis ouvrir http://localhost:3000 → **Free Build** → cliquer pour verrouille
 | Se déplacer | ZQSD (AZERTY) / WASD (QWERTY) — touches physiques |
 | Sauter / Sprint | Espace / Maj |
 | Construire (maintenir = turbo) | Clic gauche |
-| Choisir mur / sol / rampe | 1 / 2 / 3 ou molette |
+| Choisir mur / sol / rampe / toit | 1 / 2 / 3 / 4 ou molette |
 | Ranger les pièces | X |
 | Détruire la pièce visée | Clic droit |
 | Pause | Échap |
@@ -94,7 +94,8 @@ En dev, le jeu est accessible dans la console via `window.__game`.
 - [x] Qualité : ESLint, Vitest, CI GitHub Actions
 - [x] Phase 3 (base) : mur / sol / rampe sur grille, aperçu, turbo build, destruction
 - [x] Intégrité structurelle : pièces obligatoirement reliées au sol, effondrements
-- [ ] Toit (pyramide), édition de pièces, matériaux (bois / pierre / métal) et PV visibles
+- [x] Toit en pyramide
+- [ ] Édition de pièces, matériaux (bois / pierre / métal) et PV visibles
 - [ ] Armes (hitscan), cibles d'entraînement, bot simple
 - [ ] Vrai modèle animé (glTF + Mixamo), sons, particules
 - [ ] Passer à `@dimforge/rapier3d` (vrai fichier `.wasm`, ~30 % plus léger que la version base64)
