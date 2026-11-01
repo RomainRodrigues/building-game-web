@@ -25,8 +25,9 @@ export const CONFIG = {
     radius: 0.45,
     /** Hauteur totale de la capsule (pieds -> tête). */
     height: 1.8,
-    walkSpeed: 7,
-    sprintSpeed: 10.5,
+    /** Course de base : déjà rapide, le sprint n'apporte qu'un léger bonus. */
+    walkSpeed: 5.5,
+    sprintSpeed: 6.5,
     jumpVelocity: 11,
     /** Réactivité du contrôle en l'air (0 = aucun contrôle). */
     airControl: 0.35,
@@ -71,7 +72,7 @@ export const CONFIG = {
 
   build: {
     /** Taille d'une case de la grille (largeur d'un mur / sol). */
-    tile: 4,
+    tile: 5,
     /** Hauteur d'un étage (hauteur d'un mur). */
     height: 4,
     /** Épaisseur des pièces. */
