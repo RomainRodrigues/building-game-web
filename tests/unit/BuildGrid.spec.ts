@@ -5,6 +5,7 @@ import {
   computePlacement,
   floorSpec,
   levelOf,
+  liftHeightAfterPlacing,
   rampMidlineY,
   rampSpec,
   walkableSurfaceY,
@@ -106,6 +107,30 @@ describe('walkableSurfaceY', () => {
   })
 })
 
+describe('liftHeightAfterPlacing', () => {
+  const height = CONFIG.player.height
+  const ramp = rampSpec(0, 0, 0, 0) // monte vers -Z, de z = T (bas) à z = 0 (haut)
+
+  it('remonte le joueur sur une pièce qui traverse son corps', () => {
+    const feet = { x: T / 2, y: 0, z: T - 1 } // près du bas de la rampe
+    const lift = liftHeightAfterPlacing(ramp, feet, height)
+    expect(lift).not.toBeNull()
+    expect(lift!).toBeGreaterThan(0)
+    expect(lift!).toBeLessThan(height)
+  })
+
+  it('ne téléporte pas un joueur qui se trouve SOUS la rampe', () => {
+    const feet = { x: T / 2, y: 0, z: 0.5 } // sous la partie haute
+    expect(liftHeightAfterPlacing(ramp, feet, height)).toBeNull()
+  })
+
+  it('ne fait rien pour un toit au-dessus de la tête, un mur, ou hors de la pièce', () => {
+    expect(liftHeightAfterPlacing(floorSpec(0, 1, 0), { x: T / 2, y: 0, z: T / 2 }, height)).toBeNull()
+    expect(liftHeightAfterPlacing(wallSpec(0, 0, 0, 0), { x: T / 2, y: 0, z: 0 }, height)).toBeNull()
+    expect(liftHeightAfterPlacing(ramp, { x: T * 3, y: 0, z: T / 2 }, height)).toBeNull()
+  })
+})
+
 describe('computePlacement', () => {
   it('pose un mur sur le bord de la case, face au regard', () => {
     expect(computePlacement('wall', viewer(0, 0), empty).key).toBe(wallSpec(0, 0, 0, 0).key)
@@ -120,6 +145,12 @@ describe('computePlacement', () => {
     expect(computePlacement('floor', viewer(0, 0, { pitch: -1 }), empty).key).toBe(floorSpec(0, 0, 0).key)
     expect(computePlacement('floor', viewer(0, 0, { pitch: 0.8 }), empty).key).toBe(floorSpec(0, 1, 0).key)
     expect(computePlacement('floor', viewer(0, 0), empty).key).toBe(floorSpec(0, 0, -1).key)
+  })
+
+  it('ne construit la rampe dans la case du joueur que tout près de son bord bas', () => {
+    const backEdge = T // regard vers -Z : le bord bas de la case 0 est en z = T
+    expect(computePlacement('ramp', viewer(0, 0, { z: backEdge - 0.3 }), empty).key).toBe(rampSpec(0, 0, 0, 0).key)
+    expect(computePlacement('ramp', viewer(0, 0, { z: backEdge - 1.5 }), empty).key).toBe(rampSpec(0, 0, -1, 0).key)
   })
 
   it('pose la rampe dans la case devant le joueur', () => {

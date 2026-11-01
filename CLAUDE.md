@@ -63,7 +63,9 @@ pnpm build        # build de production
   un mesh ou un collider de pièce à la main.
 - **Le joueur ne doit jamais être placé au contact exact d'une surface** (téléportation,
   apparition) : le character controller Rapier ne sort pas d'une pénétration. Garder un jeu
-  (voir `SPAWN_CLEARANCE`, `LIFT_CLEARANCE`).
+  (voir `SPAWN_CLEARANCE`, `LIFT_CLEARANCE`). Ne le remonter sur une pièce que si elle
+  traverse son corps (`liftHeightAfterPlacing`) : jamais de téléportation sur une pièce
+  au-dessus de sa tête.
 - **`PlayerCommand`** est le format d'entrée de la simulation, prévu pour un futur
   multijoueur. Ne pas faire lire `Input` directement par la simulation.
 

@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu'
 import { CONFIG } from '../config'
 import type { RAPIER, RapierModule } from '../physics/rapier'
 import { createPlankTexture } from '../world/textures'
-import { computePlacement, walkableSurfaceY, type PieceSpec, type PieceType, type Viewer } from './BuildGrid'
+import { computePlacement, type PieceSpec, type PieceType, type Viewer } from './BuildGrid'
 import { StructureGraph } from './Structure'
 
 interface Piece {
@@ -137,11 +137,6 @@ export class BuildSystem {
     const hit = this.physics.castRay(this.ray, maxDistance, true, undefined, undefined, ignore)
     const piece = hit && this.byCollider.get(hit.collider.handle)
     return piece ? this.destroy(piece.spec.key) : 0
-  }
-
-  /** Surface praticable de `spec` sous le point (x, z), ou `null`. */
-  surfaceUnder(spec: PieceSpec, x: number, z: number) {
-    return walkableSurfaceY(spec, x, z)
   }
 
   clear() {

@@ -81,13 +81,6 @@ export const CONFIG = {
     turboDelay: 0.08,
     /** Portée max pour détruire une pièce, depuis le joueur. */
     editRange: 12,
-    /**
-     * Une pièce posée sur le joueur, dont la surface est au plus à cette hauteur
-     * au-dessus de ses pieds, le remonte dessus. Rampe : tout un étage (rampe
-     * construite collé à un mur) ; sol : pas au-delà, pour ne pas téléporter le
-     * joueur sur un toit posé au-dessus de sa tête.
-     */
-    maxLiftHeight: { floor: 2.5, ramp: 4.5 },
     hp: { wall: 150, floor: 140, ramp: 140 },
   },
 

@@ -63,6 +63,11 @@ const QUARTER_TURN = Math.PI / 2
 const LEVEL_TOLERANCE = 0.3
 /** Distance (en cases) du point "devant le joueur" servant à choisir la case cible. */
 const LOOK_AHEAD_TILES = 0.6
+/**
+ * Idem pour les rampes, plus loin : une rampe ne se construit dans la case du
+ * joueur que s'il est tout près de son bord bas (remontée de l'ordre d'une marche).
+ */
+const RAMP_LOOK_AHEAD_TILES = 0.85
 /** Tolérance sous la surface d'une rampe pour considérer que le joueur est dessus. */
 const ON_RAMP_TOLERANCE = 0.5
 /** Seuils d'inclinaison du regard (radians). */
@@ -169,6 +174,23 @@ export function rampSpec(cx: number, level: number, cz: number, dir: Dir): Piece
   }
 }
 
+/**
+ * Hauteur à laquelle remonter un joueur après la pose de `spec`, ou `null`.
+ *
+ * Seule une pièce qui TRAVERSE le corps du joueur (surface entre ses pieds et
+ * le haut de sa tête) le remonte dessus, pour qu'il ne reste pas coincé dedans.
+ * Une pièce entièrement au-dessus de sa tête le laisse libre en dessous.
+ */
+export function liftHeightAfterPlacing(
+  spec: PieceSpec,
+  feet: { x: number, y: number, z: number },
+  playerHeight: number,
+): number | null {
+  const surface = walkableSurfaceY(spec, feet.x, feet.z)
+  if (surface === null) return null
+  return surface > feet.y && surface < feet.y + playerHeight ? surface : null
+}
+
 /** Hauteur de la ligne médiane d'une rampe au point (x, z). */
 export function rampMidlineY(spec: PieceSpec, x: number, z: number) {
   const [dx, dz] = DIR_VEC[spec.dir]
@@ -216,7 +238,8 @@ export function computePlacement(type: PieceType, viewer: Viewer, lookup: PieceL
 
   // Case "devant" : celle qui contient un point situé un peu devant le joueur.
   // Si un mur se dresse entre le joueur et cette case, on construit dans sa propre case.
-  let [ax, az] = cellOf(viewer.x + fx * T * LOOK_AHEAD_TILES, viewer.z + fz * T * LOOK_AHEAD_TILES)
+  const lookAhead = T * (type === 'ramp' ? RAMP_LOOK_AHEAD_TILES : LOOK_AHEAD_TILES)
+  let [ax, az] = cellOf(viewer.x + fx * lookAhead, viewer.z + fz * lookAhead)
   const aheadIsOtherCell = ax !== cx || az !== cz
   if (aheadIsOtherCell && lookup(wallSpec(cx, level, cz, dir).key)) {
     ax = cx
