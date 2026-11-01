@@ -10,6 +10,7 @@ import {
   walkableSurfaceY,
   wallSpec,
   yawToDir,
+  type PieceLookup,
   type PieceSpec,
   type Viewer,
 } from '../../app/game/build/BuildGrid'
@@ -17,7 +18,13 @@ import { StructureGraph } from '../../app/game/build/Structure'
 
 const T = CONFIG.build.tile
 const H = CONFIG.build.height
-const noRamp = () => undefined
+
+/** Monde contenant les pièces données, interrogeable par clé comme dans le jeu. */
+function world(...pieces: PieceSpec[]): PieceLookup {
+  const byKey = new Map(pieces.map((piece) => [piece.key, piece]))
+  return (key) => byKey.get(key)
+}
+const empty = world()
 
 /** Joueur au centre de la case (cx, cz), regard horizontal. */
 function viewer(cx: number, cz: number, overrides: Partial<Viewer> = {}): Viewer {
@@ -101,43 +108,87 @@ describe('walkableSurfaceY', () => {
 
 describe('computePlacement', () => {
   it('pose un mur sur le bord de la case, face au regard', () => {
-    expect(computePlacement('wall', viewer(0, 0), noRamp).key).toBe(wallSpec(0, 0, 0, 0).key)
-    expect(computePlacement('wall', viewer(0, 0, { yaw: Math.PI / 2 }), noRamp).key).toBe(wallSpec(0, 0, 0, 1).key)
+    expect(computePlacement('wall', viewer(0, 0), empty).key).toBe(wallSpec(0, 0, 0, 0).key)
+    expect(computePlacement('wall', viewer(0, 0, { yaw: Math.PI / 2 }), empty).key).toBe(wallSpec(0, 0, 0, 1).key)
   })
 
   it('monte le mur d\'un étage quand on regarde vers le haut', () => {
-    expect(computePlacement('wall', viewer(0, 0, { pitch: 1 }), noRamp).level).toBe(1)
+    expect(computePlacement('wall', viewer(0, 0, { pitch: 1 }), empty).level).toBe(1)
   })
 
   it('choisit l\'étage du sol selon le regard', () => {
-    expect(computePlacement('floor', viewer(0, 0, { pitch: -1 }), noRamp).key).toBe(floorSpec(0, 0, 0).key)
-    expect(computePlacement('floor', viewer(0, 0, { pitch: 0.8 }), noRamp).key).toBe(floorSpec(0, 1, 0).key)
-    expect(computePlacement('floor', viewer(0, 0), noRamp).key).toBe(floorSpec(0, 0, -1).key)
+    expect(computePlacement('floor', viewer(0, 0, { pitch: -1 }), empty).key).toBe(floorSpec(0, 0, 0).key)
+    expect(computePlacement('floor', viewer(0, 0, { pitch: 0.8 }), empty).key).toBe(floorSpec(0, 1, 0).key)
+    expect(computePlacement('floor', viewer(0, 0), empty).key).toBe(floorSpec(0, 0, -1).key)
   })
 
   it('pose la rampe dans la case devant le joueur', () => {
-    const spec = computePlacement('ramp', viewer(0, 0), noRamp)
+    const spec = computePlacement('ramp', viewer(0, 0), empty)
     expect(spec.key).toBe(rampSpec(0, 0, -1, 0).key)
     expect(spec.dir).toBe(0)
   })
 
-  it('enchaîne les rampes vers le haut quand on est déjà sur une rampe ("ramp rush")', () => {
-    const current = rampSpec(0, 0, -1, 0)
-    const rampAt = (cx: number, level: number, cz: number): PieceSpec | undefined =>
-      cx === 0 && level === 0 && cz === -1 ? current : undefined
-    const onRamp = viewer(0, -1, { feetY: H / 2 })
-    const next = computePlacement('ramp', onRamp, rampAt)
-    expect(next.key).toBe(rampSpec(0, 1, -2, 0).key)
+  describe('face à un mur', () => {
+    it('construit la rampe dans la case du joueur, jamais derrière le mur', () => {
+      const spec = computePlacement('ramp', viewer(0, 0), world(wallSpec(0, 0, 0, 0)))
+      expect(spec.key).toBe(rampSpec(0, 0, 0, 0).key)
+      expect(spec.dir).toBe(0)
+    })
+
+    it('construit le sol dans la case du joueur', () => {
+      expect(computePlacement('floor', viewer(0, 0), world(wallSpec(0, 0, 0, 0))).key).toBe(floorSpec(0, 0, 0).key)
+    })
+
+    it('donne une rampe soutenue par le sol et le mur quand on est en hauteur', () => {
+      const floor = floorSpec(0, 1, 0)
+      const wall = wallSpec(0, 1, 0, 0)
+      const lower = wallSpec(0, 0, 0, 1)
+      const graph = new StructureGraph()
+      ;[lower, floor, wall].forEach((piece) => graph.add(piece))
+
+      const spec = computePlacement('ramp', viewer(0, 0, { feetY: H }), world(lower, floor, wall))
+      expect(spec.key).toBe(rampSpec(0, 1, 0, 0).key)
+      expect(graph.isSupported(spec)).toBe(true)
+    })
+  })
+
+  describe('rampe déjà présente', () => {
+    it('prolonge la rampe visée d\'une case et d\'un étage', () => {
+      const existing = rampSpec(0, 0, -1, 0)
+      expect(computePlacement('ramp', viewer(0, 0), world(existing)).key).toBe(rampSpec(0, 1, -2, 0).key)
+    })
+
+    it('n\'enchaîne pas si la rampe existante monte dans une autre direction', () => {
+      const existing = rampSpec(0, 0, -1, 3)
+      const spec = computePlacement('ramp', viewer(0, 0), world(existing))
+      expect(spec.key).toBe(existing.key) // emplacement occupé : aperçu invalide
+      expect(spec.level).toBe(0)
+    })
   })
 
   describe('sur une rampe qui monte dans le sens du regard', () => {
     const current = rampSpec(0, 0, -1, 0)
-    const rampAt = (cx: number, level: number, cz: number): PieceSpec | undefined =>
-      cx === 0 && level === 0 && cz === -1 ? current : undefined
+    const lookup = world(current)
     const onRamp = viewer(0, -1, { feetY: H / 2 })
 
+    it('enchaîne les rampes vers le haut ("ramp rush")', () => {
+      expect(computePlacement('ramp', onRamp, lookup).key).toBe(rampSpec(0, 1, -2, 0).key)
+    })
+
+    it('enchaîne aussi depuis le bas de la rampe', () => {
+      const z = -0.5 // tout près du bord bas (z = 0)
+      const atBottom = viewer(0, -1, { z, feetY: rampMidlineY(current, T / 2, z) })
+      expect(computePlacement('ramp', atBottom, lookup).key).toBe(rampSpec(0, 1, -2, 0).key)
+    })
+
+    it('ne considère pas qu\'on monte quand on est SOUS la rampe', () => {
+      const z = -T + 0.5 // sous la partie haute
+      const below = viewer(0, -1, { z, feetY: 0 })
+      expect(computePlacement('floor', below, lookup).key).not.toBe(floorSpec(0, 1, -2).key)
+    })
+
     it('pose le mur au bout de la rampe, au même étage, en regardant devant', () => {
-      const wall = computePlacement('wall', onRamp, rampAt)
+      const wall = computePlacement('wall', onRamp, lookup)
       expect(wall.key).toBe(wallSpec(0, 0, -1, 0).key)
       // Le haut du mur est exactement au sommet de la rampe.
       expect(wall.y + wall.sy / 2).toBeCloseTo(H)
@@ -145,12 +196,12 @@ describe('computePlacement', () => {
 
     it('pose le mur au-dessus de la rampe en regardant vers le haut ou en sautant', () => {
       const above = wallSpec(0, 1, -1, 0).key
-      expect(computePlacement('wall', { ...onRamp, pitch: 1 }, rampAt).key).toBe(above)
-      expect(computePlacement('wall', { ...onRamp, airborne: true }, rampAt).key).toBe(above)
+      expect(computePlacement('wall', { ...onRamp, pitch: 1 }, lookup).key).toBe(above)
+      expect(computePlacement('wall', { ...onRamp, airborne: true }, lookup).key).toBe(above)
     })
 
     it('prolonge la montée avec un sol au sommet de la rampe', () => {
-      expect(computePlacement('floor', onRamp, rampAt).key).toBe(floorSpec(0, 1, -2).key)
+      expect(computePlacement('floor', onRamp, lookup).key).toBe(floorSpec(0, 1, -2).key)
     })
 
     it('pose des pièces reliées à la rampe (donc constructibles)', () => {
@@ -158,15 +209,9 @@ describe('computePlacement', () => {
       graph.add(current)
       for (const type of ['wall', 'floor', 'ramp'] as const) {
         for (const view of [onRamp, { ...onRamp, airborne: true }]) {
-          expect(graph.isSupported(computePlacement(type, view, rampAt))).toBe(true)
+          expect(graph.isSupported(computePlacement(type, view, lookup))).toBe(true)
         }
       }
     })
-  })
-
-  it('n\'enchaîne pas si la rampe monte dans une autre direction', () => {
-    const current = rampSpec(0, 0, 0, 3)
-    const spec = computePlacement('ramp', viewer(0, 0, { feetY: H / 2 }), () => current)
-    expect(spec.level).toBe(0)
   })
 })

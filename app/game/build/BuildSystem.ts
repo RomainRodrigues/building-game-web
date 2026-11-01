@@ -82,7 +82,7 @@ export class BuildSystem {
       this.setPreview(null)
       return
     }
-    const spec = computePlacement(type, viewer, (cx, level, cz) => this.pieces.get(`ramp:${cx}:${level}:${cz}`)?.spec)
+    const spec = computePlacement(type, viewer, (key) => this.pieces.get(key)?.spec)
     this.setPreview({ spec, valid: this.canPlace(spec, playerFeet) })
   }
 

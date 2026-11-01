@@ -51,7 +51,8 @@ export interface Viewer {
   airborne: boolean
 }
 
-export type RampLookup = (cx: number, level: number, cz: number) => PieceSpec | undefined
+/** Recherche d'une pièce existante par sa clé d'emplacement. */
+export type PieceLookup = (key: string) => PieceSpec | undefined
 
 const T = CONFIG.build.tile
 const H = CONFIG.build.height
@@ -62,8 +63,8 @@ const QUARTER_TURN = Math.PI / 2
 const LEVEL_TOLERANCE = 0.3
 /** Distance (en cases) du point "devant le joueur" servant à choisir la case cible. */
 const LOOK_AHEAD_TILES = 0.6
-/** Hauteur au-dessus de la base d'une rampe à partir de laquelle on est "dessus". */
-const ON_RAMP_MIN_HEIGHT = 0.2
+/** Tolérance sous la surface d'une rampe pour considérer que le joueur est dessus. */
+const ON_RAMP_TOLERANCE = 0.5
 /** Seuils d'inclinaison du regard (radians). */
 const PITCH_WALL_UP = 0.75
 const PITCH_FLOOR_UP = 0.5
@@ -189,34 +190,38 @@ export function walkableSurfaceY(spec: PieceSpec, x: number, z: number): number 
 }
 
 /**
- * Choisit l'emplacement de la pièce à poser selon la position et le regard
- * du joueur. `rampAt` permet de savoir si le joueur est sur une rampe, pour
- * enchaîner les pièces vers le haut ("ramp rush").
+ * Choisit l'emplacement de la pièce à poser selon la position et le regard du
+ * joueur, en tenant compte des pièces existantes (`lookup`) :
+ *  - sur une rampe qui monte dans le sens du regard, les pièces prolongent la montée ;
+ *  - face à un mur, rampes et sols se construisent dans la case du joueur ;
+ *  - une rampe visée là où il y en a déjà une dans le même sens la prolonge.
  */
-export function computePlacement(type: PieceType, viewer: Viewer, rampAt: RampLookup): PieceSpec {
+export function computePlacement(type: PieceType, viewer: Viewer, lookup: PieceLookup): PieceSpec {
   const dir = yawToDir(viewer.yaw)
   const [fx, fz] = DIR_VEC[dir]
   const [cx, cz] = cellOf(viewer.x, viewer.z)
   const level = levelOf(viewer.feetY)
 
-  const currentRamp = rampAt(cx, level, cz)
-  const climbing = currentRamp?.dir === dir && viewer.feetY > level * H + ON_RAMP_MIN_HEIGHT
-  if (climbing) {
-    // Sur une rampe qui monte dans le sens du regard ("ramp rush") :
+  if (isClimbing(viewer, cx, level, cz, dir, lookup)) {
+    // "Ramp rush" :
     //  - rampe / sol : dans la case suivante, un étage plus haut (prolongent la montée) ;
     //  - mur : au bout de la rampe, au même étage (la rampe s'appuie contre lui) ;
     //    en regardant vers le haut ou en sautant, il passe au-dessus de la rampe.
     // Dans tous les cas la pièce partage le bord haut de la rampe : elle est soutenue.
-    const nx = cx + fx
-    const nz = cz + fz
-    if (type === 'ramp') return rampSpec(nx, level + 1, nz, dir)
-    if (type === 'floor') return floorSpec(nx, level + 1, nz)
+    if (type === 'ramp') return rampSpec(cx + fx, level + 1, cz + fz, dir)
+    if (type === 'floor') return floorSpec(cx + fx, level + 1, cz + fz)
     const above = viewer.airborne || viewer.pitch > PITCH_WALL_UP
     return wallSpec(cx, above ? level + 1 : level, cz, dir)
   }
 
   // Case "devant" : celle qui contient un point situé un peu devant le joueur.
-  const [ax, az] = cellOf(viewer.x + fx * T * LOOK_AHEAD_TILES, viewer.z + fz * T * LOOK_AHEAD_TILES)
+  // Si un mur se dresse entre le joueur et cette case, on construit dans sa propre case.
+  let [ax, az] = cellOf(viewer.x + fx * T * LOOK_AHEAD_TILES, viewer.z + fz * T * LOOK_AHEAD_TILES)
+  const aheadIsOtherCell = ax !== cx || az !== cz
+  if (aheadIsOtherCell && lookup(wallSpec(cx, level, cz, dir).key)) {
+    ax = cx
+    az = cz
+  }
 
   switch (type) {
     case 'wall':
@@ -225,7 +230,20 @@ export function computePlacement(type: PieceType, viewer: Viewer, rampAt: RampLo
       if (viewer.pitch < PITCH_FLOOR_DOWN) return floorSpec(cx, level, cz)
       if (viewer.pitch > PITCH_FLOOR_UP) return floorSpec(cx, level + 1, cz)
       return floorSpec(ax, level, az)
-    case 'ramp':
-      return rampSpec(ax, level, az, dir)
+    case 'ramp': {
+      const target = rampSpec(ax, level, az, dir)
+      // Une rampe existe déjà ici dans le même sens : on la prolonge d'une case.
+      const existing = lookup(target.key)
+      if (existing?.dir === dir) return rampSpec(ax + fx, level + 1, az + fz, dir)
+      return target
+    }
   }
+}
+
+/** Le joueur se tient sur une rampe de sa case qui monte dans la direction `dir`. */
+function isClimbing(viewer: Viewer, cx: number, level: number, cz: number, dir: Dir, lookup: PieceLookup) {
+  const ramp = lookup(rampSpec(cx, level, cz, dir).key)
+  if (ramp?.dir !== dir) return false
+  const surface = walkableSurfaceY(ramp, viewer.x, viewer.z)
+  return surface !== null && viewer.feetY >= surface - ON_RAMP_TOLERANCE
 }
