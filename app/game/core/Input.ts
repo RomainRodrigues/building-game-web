@@ -1,128 +1,154 @@
+import { BINDINGS, type Action } from './bindings'
+
+/** Durée pendant laquelle on ignore la souris juste après le verrouillage (ms). */
+const LOCK_GRACE_MS = 100
+/** Au-delà, un mouvement de souris en un seul événement est considéré comme aberrant (px). */
+const MAX_MOUSE_DELTA = 400
+
+const ACTIONS = Object.keys(BINDINGS) as Action[]
+
+/** Entrées "ponctuelles" accumulées depuis le dernier tick de simulation. */
+export interface InputFrame {
+  /** Actions déclenchées (appui) pendant l'intervalle. */
+  pressed: ReadonlySet<Action>
+  /** Crans de molette (positif = vers le bas). */
+  wheel: number
+}
+
 /**
- * Gestion des entrées clavier / souris.
+ * Gestion clavier / souris basée sur des ACTIONS (voir `bindings.ts`).
  *
- * On utilise `KeyboardEvent.code` (touche *physique*) plutôt que `key` :
- * "KeyW" correspond à Z sur un clavier AZERTY et à W en QWERTY, donc les
- * contrôles fonctionnent partout sans configuration.
- *
- * Les événements "ponctuels" (appui sur une touche, clic) sont accumulés puis
- * consommés une fois par tick de simulation via `consumePressed()`.
+ * - `isHeld(action)` : état continu (déplacement, sprint, clic maintenu).
+ * - `pollFrame()` : événements ponctuels, consommés une fois par tick.
+ * - `consumeLook()` : mouvement de souris, consommé une fois par frame.
  */
 export class Input {
   private readonly down = new Set<string>()
-  private pressed = new Set<string>()
-  private mouseDX = 0
-  private mouseDY = 0
+  private pressedCodes = new Set<string>()
+  private lookX = 0
+  private lookY = 0
   private wheel = 0
   private lockTime = 0
+  private _locked = false
 
-  locked = false
   onLockChange?: (locked: boolean) => void
 
   constructor(private readonly element: HTMLElement) {
     window.addEventListener('keydown', this.onKeyDown)
     window.addEventListener('keyup', this.onKeyUp)
     window.addEventListener('blur', this.onBlur)
-    element.addEventListener('mousedown', this.onMouseDown)
     window.addEventListener('mouseup', this.onMouseUp)
     window.addEventListener('mousemove', this.onMouseMove)
+    element.addEventListener('mousedown', this.onMouseDown)
     element.addEventListener('wheel', this.onWheel, { passive: true })
-    element.addEventListener('contextmenu', this.preventDefault)
+    element.addEventListener('contextmenu', preventDefault)
     document.addEventListener('pointerlockchange', this.onPointerLockChange)
   }
 
+  get locked() {
+    return this._locked
+  }
+
   requestLock() {
-    // requestPointerLock renvoie une Promise dans les navigateurs récents.
-    const result = this.element.requestPointerLock() as unknown
-    if (result instanceof Promise) result.catch(() => {})
+    // Promise dans les navigateurs récents, void dans les anciens : on ignore le refus.
+    Promise.resolve(this.element.requestPointerLock()).catch(() => undefined)
   }
 
-  isDown(code: string) {
-    return this.down.has(code)
+  isHeld(action: Action) {
+    return BINDINGS[action].some((code) => this.down.has(code))
   }
 
-  /** Renvoie les touches/boutons pressés depuis le dernier appel, puis les vide. */
-  consumePressed(): ReadonlySet<string> {
-    const p = this.pressed
-    this.pressed = new Set()
-    return p
+  /** -1, 0 ou 1 selon les deux actions opposées. */
+  axis(negative: Action, positive: Action) {
+    return Number(this.isHeld(positive)) - Number(this.isHeld(negative))
   }
 
-  consumeMouseDelta() {
-    const d = { x: this.mouseDX, y: this.mouseDY }
-    this.mouseDX = 0
-    this.mouseDY = 0
-    return d
-  }
-
-  consumeWheel() {
-    const w = this.wheel
+  pollFrame(): InputFrame {
+    const codes = this.pressedCodes
+    this.pressedCodes = new Set()
+    const pressed = new Set<Action>()
+    for (const action of ACTIONS) {
+      if (BINDINGS[action].some((code) => codes.has(code))) pressed.add(action)
+    }
+    const wheel = this.wheel
     this.wheel = 0
-    return w
+    return { pressed, wheel }
+  }
+
+  consumeLook() {
+    const delta = { x: this.lookX, y: this.lookY }
+    this.lookX = 0
+    this.lookY = 0
+    return delta
   }
 
   dispose() {
     window.removeEventListener('keydown', this.onKeyDown)
     window.removeEventListener('keyup', this.onKeyUp)
     window.removeEventListener('blur', this.onBlur)
-    this.element.removeEventListener('mousedown', this.onMouseDown)
     window.removeEventListener('mouseup', this.onMouseUp)
     window.removeEventListener('mousemove', this.onMouseMove)
+    this.element.removeEventListener('mousedown', this.onMouseDown)
     this.element.removeEventListener('wheel', this.onWheel)
-    this.element.removeEventListener('contextmenu', this.preventDefault)
+    this.element.removeEventListener('contextmenu', preventDefault)
     document.removeEventListener('pointerlockchange', this.onPointerLockChange)
     if (document.pointerLockElement === this.element) document.exitPointerLock()
   }
 
-  private onKeyDown = (e: KeyboardEvent) => {
-    if (!this.locked) return
-    if (e.code !== 'Escape') e.preventDefault()
-    if (!e.repeat) this.pressed.add(e.code)
-    this.down.add(e.code)
+  private press(code: string) {
+    this.down.add(code)
+    this.pressedCodes.add(code)
   }
 
-  private onKeyUp = (e: KeyboardEvent) => {
+  private readonly onKeyDown = (e: KeyboardEvent) => {
+    if (!this._locked) return
+    if (e.code !== 'Escape') e.preventDefault()
+    if (e.repeat) return
+    this.press(e.code)
+  }
+
+  private readonly onKeyUp = (e: KeyboardEvent) => {
     this.down.delete(e.code)
   }
 
-  private onBlur = () => {
+  private readonly onBlur = () => {
     this.down.clear()
   }
 
-  private onMouseDown = (e: MouseEvent) => {
-    if (!this.locked) {
+  private readonly onMouseDown = (e: MouseEvent) => {
+    if (!this._locked) {
       this.requestLock()
       return
     }
-    const code = `Mouse${e.button}`
-    this.down.add(code)
-    this.pressed.add(code)
+    this.press(`Mouse${e.button}`)
   }
 
-  private onMouseUp = (e: MouseEvent) => {
+  private readonly onMouseUp = (e: MouseEvent) => {
     this.down.delete(`Mouse${e.button}`)
   }
 
-  private onMouseMove = (e: MouseEvent) => {
-    if (!this.locked) return
-    // Certains navigateurs envoient un "saut" énorme juste après le verrouillage
-    // du pointeur (ou lors d'un clic) : on ignore ces valeurs aberrantes.
-    if (performance.now() - this.lockTime < 100) return
-    if (Math.abs(e.movementX) > 400 || Math.abs(e.movementY) > 400) return
-    this.mouseDX += e.movementX
-    this.mouseDY += e.movementY
+  private readonly onMouseMove = (e: MouseEvent) => {
+    if (!this._locked) return
+    // Chromium envoie parfois un "saut" énorme juste après le verrouillage du
+    // pointeur ou lors d'un clic : on filtre ces valeurs aberrantes.
+    if (performance.now() - this.lockTime < LOCK_GRACE_MS) return
+    if (Math.abs(e.movementX) > MAX_MOUSE_DELTA || Math.abs(e.movementY) > MAX_MOUSE_DELTA) return
+    this.lookX += e.movementX
+    this.lookY += e.movementY
   }
 
-  private onWheel = (e: WheelEvent) => {
-    if (this.locked) this.wheel += Math.sign(e.deltaY)
+  private readonly onWheel = (e: WheelEvent) => {
+    if (this._locked) this.wheel += Math.sign(e.deltaY)
   }
 
-  private onPointerLockChange = () => {
-    this.locked = document.pointerLockElement === this.element
+  private readonly onPointerLockChange = () => {
+    this._locked = document.pointerLockElement === this.element
     this.lockTime = performance.now()
-    if (!this.locked) this.down.clear()
-    this.onLockChange?.(this.locked)
+    if (!this._locked) this.down.clear()
+    this.onLockChange?.(this._locked)
   }
+}
 
-  private preventDefault = (e: Event) => e.preventDefault()
+function preventDefault(e: Event) {
+  e.preventDefault()
 }

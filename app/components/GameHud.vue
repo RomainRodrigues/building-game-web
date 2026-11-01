@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { HudState } from '~/game/Game'
 
-const props = defineProps<{ hud: HudState | null }>()
-defineEmits<{ resume: []; clear: [] }>()
+const props = defineProps<{ hud: HudState }>()
+defineEmits<{ resume: [], clear: [] }>()
 
 const slots = [
   { type: 'wall', key: '1', label: 'Mur' },
@@ -10,36 +10,62 @@ const slots = [
   { type: 'ramp', key: '3', label: 'Rampe' },
 ] as const
 
-const paused = computed(() => !props.hud?.locked)
+const paused = computed(() => !props.hud.locked)
 </script>
 
 <template>
   <div class="hud">
-    <div v-if="hud" class="stats">
+    <div class="stats">
       {{ hud.fps }} FPS · {{ hud.backend }} · {{ hud.pieces }} pièces · {{ hud.speed }} m/s
     </div>
 
-    <div v-if="!paused" class="crosshair" />
+    <div
+      v-if="!paused"
+      class="crosshair"
+    />
 
-    <div v-if="hud && !paused" class="hotbar">
-      <div v-for="s in slots" :key="s.type" class="slot" :class="{ active: hud.piece === s.type }">
+    <div
+      v-if="!paused"
+      class="hotbar"
+    >
+      <div
+        v-for="s in slots"
+        :key="s.type"
+        class="slot"
+        :class="{ active: hud.piece === s.type }"
+      >
         <span class="key">{{ s.key }}</span>
         <span>{{ s.label }}</span>
       </div>
     </div>
 
-    <div v-if="paused" class="pause">
+    <div
+      v-if="paused"
+      class="pause"
+    >
       <div class="panel">
         <h1>Free Build</h1>
-        <button class="primary" @click="$emit('resume')">Cliquer pour jouer</button>
-        <button @click="$emit('clear')">Tout effacer</button>
-        <NuxtLink to="/" class="link">Retour au menu</NuxtLink>
+        <button
+          class="primary"
+          @click="$emit('resume')"
+        >
+          Cliquer pour jouer
+        </button>
+        <button @click="$emit('clear')">
+          Tout effacer
+        </button>
+        <NuxtLink
+          to="/"
+          class="link"
+        >Retour au menu</NuxtLink>
         <ul class="controls">
           <li><b>ZQSD / WASD</b> se déplacer · <b>Espace</b> sauter · <b>Maj</b> sprint</li>
           <li><b>Souris</b> viser · <b>Clic gauche</b> construire (maintenir = turbo)</li>
           <li><b>1 / 2 / 3</b> ou <b>molette</b> : mur / sol / rampe · <b>X</b> ranger</li>
           <li><b>Clic droit</b> détruire la pièce visée · <b>Échap</b> pause</li>
-          <li class="hint">Regarder vers le haut / bas change l'étage du sol et du mur.</li>
+          <li class="hint">
+            Regarder vers le haut / bas change l'étage du sol et du mur.
+          </li>
         </ul>
       </div>
     </div>

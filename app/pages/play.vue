@@ -1,15 +1,31 @@
 <script setup lang="ts">
-const game = ref<{ lock: () => void; clearBuilds: () => void }>()
+const canvas = useTemplateRef('canvas')
 </script>
 
 <template>
-  <GameCanvas ref="game" class="screen">
+  <GameCanvas
+    ref="canvas"
+    class="screen"
+  >
     <template #default="{ hud, error }">
-      <div v-if="error" class="error">
+      <div
+        v-if="error"
+        class="overlay error"
+      >
         Impossible de démarrer le jeu : {{ error }}
       </div>
-      <div v-else-if="!hud" class="loading">Chargement…</div>
-      <GameHud v-else :hud="hud" @resume="game?.lock()" @clear="game?.clearBuilds()" />
+      <div
+        v-else-if="!hud"
+        class="overlay"
+      >
+        Chargement…
+      </div>
+      <GameHud
+        v-else
+        :hud="hud"
+        @resume="canvas?.lock()"
+        @clear="canvas?.clearBuilds()"
+      />
     </template>
   </GameCanvas>
 </template>
@@ -19,8 +35,8 @@ const game = ref<{ lock: () => void; clearBuilds: () => void }>()
   width: 100vw;
   height: 100vh;
 }
-.loading,
-.error {
+
+.overlay {
   position: absolute;
   inset: 0;
   display: grid;
@@ -28,6 +44,7 @@ const game = ref<{ lock: () => void; clearBuilds: () => void }>()
   font-size: 20px;
   background: var(--bg);
 }
+
 .error {
   color: #ff8a8a;
 }

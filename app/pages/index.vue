@@ -3,8 +3,14 @@
     <h1>BUILD ARENA</h1>
     <p>Construis, grimpe, survis.</p>
     <nav>
-      <NuxtLink to="/play" class="btn primary">Free Build</NuxtLink>
-      <span class="btn disabled" title="Bientôt">Duel contre un bot (bientôt)</span>
+      <NuxtLink
+        to="/play"
+        class="btn primary"
+      >Free Build</NuxtLink>
+      <span
+        class="btn disabled"
+        title="Bientôt"
+      >Duel contre un bot (bientôt)</span>
     </nav>
   </main>
 </template>

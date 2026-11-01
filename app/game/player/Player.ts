@@ -1,176 +1,185 @@
 import * as THREE from 'three/webgpu'
-import type RAPIER from '@dimforge/rapier3d-compat'
 import { CONFIG } from '../config'
+import type { RAPIER, RapierModule } from '../physics/rapier'
+import { createAvatar } from './avatar'
 
-type Rapier = typeof RAPIER
-
-/** Commandes du joueur pour UN tick. C'est exactement ce qu'on enverrait à un serveur en multi. */
+/**
+ * Intentions du joueur pour UN tick de simulation.
+ * C'est exactement ce qu'un client enverrait à un serveur en multijoueur.
+ */
 export interface PlayerCommand {
-  /** -1..1 : avancer / reculer */
+  /** -1..1 : reculer / avancer */
   forward: number
-  /** -1..1 : droite / gauche */
+  /** -1..1 : gauche / droite */
   right: number
   jump: boolean
   sprint: boolean
-  /** Orientation horizontale de la caméra (radians). */
+  /** Orientation horizontale de la visée (radians). */
   yaw: number
 }
 
 const P = CONFIG.player
-const HALF_HEIGHT = P.height / 2 - P.radius // demi-hauteur de la partie cylindrique
+const HALF_HEIGHT = P.height / 2
+/** Demi-hauteur de la partie cylindrique de la capsule. */
+const CAPSULE_HALF_SEGMENT = HALF_HEIGHT - P.radius
+/** En dessous de cette vitesse au carré, on considère que le joueur ne se déplace pas. */
+const MIN_MOVE_SQ = 1e-2
+/** Tolérances pour la compensation de pente. */
+const SLOPE_EPSILON = 1e-3
+const SLOPE_MIN_RATIO = 0.95
+/** Échelle de temps du contrôle aérien (réactivité à 1/10 s). */
+const AIR_CONTROL_RATE = 10
 
 /**
- * Joueur contrôlé par un "kinematic character controller" Rapier :
- * on calcule le déplacement voulu, Rapier le corrige (murs, pentes, marches).
+ * Joueur piloté par le "kinematic character controller" de Rapier :
+ * on calcule un déplacement voulu, Rapier le corrige (murs, pentes, marches).
+ *
+ * La position simulée (`position`, centre de la capsule) avance par ticks ;
+ * la position affichée (`renderFeet`) est interpolée entre deux ticks.
  */
 export class Player {
   readonly mesh: THREE.Group
-  readonly body: RAPIER.RigidBody
   readonly collider: RAPIER.Collider
+  /** Centre de la capsule au tick courant. */
+  readonly position = new THREE.Vector3()
+  /** Pieds du joueur, interpolés pour l'affichage. */
+  readonly renderFeet = new THREE.Vector3()
+
+  private readonly body: RAPIER.RigidBody
   private readonly controller: RAPIER.KinematicCharacterController
-
-  /** Position du centre de la capsule au tick précédent / courant (pour l'interpolation). */
-  private readonly prevPos = new THREE.Vector3()
-  readonly pos = new THREE.Vector3()
-  /** Position affichée (interpolée). */
-  readonly renderPos = new THREE.Vector3()
-
+  private readonly spawn: THREE.Vector3
+  private readonly previous = new THREE.Vector3()
   private readonly velocity = new THREE.Vector3()
-  grounded = false
+  private readonly wish = new THREE.Vector3()
+  private readonly desired = { x: 0, y: 0, z: 0 }
+  private grounded = false
   private facing = 0
 
-  constructor(scene: THREE.Scene, rapier: Rapier, private readonly physics: RAPIER.World, spawn: THREE.Vector3) {
-    this.pos.copy(spawn).setY(spawn.y + P.height / 2)
-    this.prevPos.copy(this.pos)
-    this.renderPos.copy(this.pos)
+  constructor(scene: THREE.Scene, rapier: RapierModule, physics: RAPIER.World, spawnFeet: THREE.Vector3) {
+    this.spawn = spawnFeet.clone()
+    this.position.set(spawnFeet.x, spawnFeet.y + HALF_HEIGHT, spawnFeet.z)
+    this.previous.copy(this.position)
 
     this.body = physics.createRigidBody(
-      rapier.RigidBodyDesc.kinematicPositionBased().setTranslation(this.pos.x, this.pos.y, this.pos.z),
+      rapier.RigidBodyDesc.kinematicPositionBased().setTranslation(this.position.x, this.position.y, this.position.z),
     )
-    this.collider = physics.createCollider(rapier.ColliderDesc.capsule(HALF_HEIGHT, P.radius), this.body)
+    this.collider = physics.createCollider(rapier.ColliderDesc.capsule(CAPSULE_HALF_SEGMENT, P.radius), this.body)
 
-    this.controller = physics.createCharacterController(0.02)
+    this.controller = physics.createCharacterController(P.controllerOffset)
     this.controller.setUp({ x: 0, y: 1, z: 0 })
     this.controller.setMaxSlopeClimbAngle(THREE.MathUtils.degToRad(P.maxSlopeDeg))
-    this.controller.setMinSlopeSlideAngle(THREE.MathUtils.degToRad(P.maxSlopeDeg + 5))
-    this.controller.enableAutostep(0.45, 0.2, false)
-    this.controller.enableSnapToGround(0.4)
-    this.controller.setApplyImpulsesToDynamicBodies(true)
+    // Au-delà de cet angle seulement, on glisse : on reste immobile sur une rampe.
+    this.controller.setMinSlopeSlideAngle(THREE.MathUtils.degToRad(P.minSlopeSlideDeg))
+    this.controller.enableAutostep(P.autostepMaxHeight, P.autostepMinWidth, false)
+    this.controller.enableSnapToGround(P.snapToGroundDistance)
 
     this.mesh = createAvatar()
     scene.add(this.mesh)
+    this.render(1, 0)
   }
 
-  /** Avance la simulation d'un tick. */
-  update(cmd: PlayerCommand, dt: number) {
-    this.prevPos.copy(this.pos)
-
-    // Direction voulue dans le plan horizontal, relative à la caméra.
-    const sin = Math.sin(cmd.yaw)
-    const cos = Math.cos(cmd.yaw)
-    const wish = new THREE.Vector3(
-      -sin * cmd.forward + cos * cmd.right,
-      0,
-      -cos * cmd.forward - sin * cmd.right,
-    )
-    if (wish.lengthSq() > 1) wish.normalize()
-    const speed = cmd.sprint && cmd.forward > 0 ? P.sprintSpeed : P.walkSpeed
-    wish.multiplyScalar(speed)
-
-    if (this.grounded) {
-      this.velocity.x = wish.x
-      this.velocity.z = wish.z
-      this.velocity.y = cmd.jump ? P.jumpVelocity : -1 // légère pression vers le sol
-    } else {
-      // Contrôle réduit en l'air.
-      const k = Math.min(1, P.airControl * dt * 10)
-      this.velocity.x += (wish.x - this.velocity.x) * k
-      this.velocity.z += (wish.z - this.velocity.z) * k
-      this.velocity.y += CONFIG.world.gravity * dt
-    }
-
-    const desired = { x: this.velocity.x * dt, y: this.velocity.y * dt, z: this.velocity.z * dt }
-    this.controller.computeColliderMovement(this.collider, desired)
-    let move = this.controller.computedMovement()
-
-    // Sur une pente, Rapier projette le mouvement sur le plan incliné : à 45°
-    // on perdrait ~50 % de vitesse horizontale. On relance le calcul avec un
-    // déplacement agrandi pour garder la même vitesse au sol qu'à plat.
-    const wanted = Math.hypot(desired.x, desired.z)
-    const got = Math.hypot(move.x, move.z)
-    if (this.grounded && move.y > 0.001 && got > 1e-4 && got < wanted * 0.95) {
-      const k = Math.min(wanted / got, 2)
-      this.controller.computeColliderMovement(this.collider, { x: desired.x * k, y: desired.y, z: desired.z * k })
-      move = this.controller.computedMovement()
-    }
-
-    this.grounded = this.controller.computedGrounded()
-
-    // Plafond touché : on coupe la vitesse verticale.
-    if (this.velocity.y > 0 && move.y < desired.y * 0.5) this.velocity.y = 0
-
-    this.pos.set(this.pos.x + move.x, this.pos.y + move.y, this.pos.z + move.z)
-
-    // Filet de sécurité si on tombe hors de la carte.
-    if (this.pos.y < -30) {
-      this.pos.set(CONFIG.build.tile / 2, 5, CONFIG.build.tile / 2)
-      this.prevPos.copy(this.pos)
-      this.velocity.set(0, 0, 0)
-    }
-
-    this.body.setNextKinematicTranslation(this.pos)
-
-    if (wish.lengthSq() > 0.01) this.facing = Math.atan2(-wish.x, -wish.z)
-  }
-
-  /** Met à jour le mesh à partir de la position interpolée. */
-  render(alpha: number, frameDt: number) {
-    this.renderPos.lerpVectors(this.prevPos, this.pos, alpha)
-    this.mesh.position.set(this.renderPos.x, this.renderPos.y - P.height / 2, this.renderPos.z)
-    // Rotation douce vers la direction de déplacement.
-    const diff = Math.atan2(Math.sin(this.facing - this.mesh.rotation.y), Math.cos(this.facing - this.mesh.rotation.y))
-    this.mesh.rotation.y += diff * Math.min(1, frameDt * 14)
-  }
-
-  /** Remonte le joueur (ex : sol posé sous ses pieds). Pas d'interpolation pour éviter un "glissement". */
-  liftFeetTo(feetY: number) {
-    this.pos.y = feetY + P.height / 2
-    this.prevPos.y = this.pos.y
-    if (this.velocity.y < 0) this.velocity.y = 0
-    this.body.setNextKinematicTranslation(this.pos)
-  }
-
-  /** Position des pieds (bas de la capsule). */
   get feetY() {
-    return this.pos.y - P.height / 2
+    return this.position.y - HALF_HEIGHT
+  }
+
+  get isGrounded() {
+    return this.grounded
   }
 
   get horizontalSpeed() {
     return Math.hypot(this.velocity.x, this.velocity.z)
   }
-}
 
-/** Petit avatar "low poly" en primitives, en attendant un vrai modèle glTF. */
-function createAvatar() {
-  const g = new THREE.Group()
-  const bodyMat = new THREE.MeshStandardMaterial({ color: '#ff7a3d', roughness: 0.6 })
-  const darkMat = new THREE.MeshStandardMaterial({ color: '#273046', roughness: 0.7 })
-  const skinMat = new THREE.MeshStandardMaterial({ color: '#f1c7a1', roughness: 0.8 })
+  /** Avance la simulation d'un tick. */
+  update(cmd: PlayerCommand, dt: number) {
+    this.previous.copy(this.position)
+    this.computeWishVelocity(cmd)
+    this.integrateVelocity(cmd, dt)
+    this.move(dt)
 
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.33, 0.55, 4, 12), bodyMat)
-  torso.position.y = 1.05
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 12), skinMat)
-  head.position.y = 1.6
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.09, 0.1), darkMat)
-  visor.position.set(0, 1.63, -0.2)
-  const legs = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.35, 4, 12), darkMat)
-  legs.position.y = 0.45
-  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.45, 0.2), darkMat)
-  pack.position.set(0, 1.1, 0.33)
+    if (this.position.y < CONFIG.world.killY) this.respawn()
+    this.body.setNextKinematicTranslation(this.position)
 
-  for (const m of [torso, head, visor, legs, pack]) {
-    m.castShadow = true
-    g.add(m)
+    if (this.wish.lengthSq() > MIN_MOVE_SQ) this.facing = Math.atan2(-this.wish.x, -this.wish.z)
   }
-  return g
+
+  /** Met à jour l'affichage à partir de la position interpolée. */
+  render(alpha: number, frameDt: number) {
+    this.renderFeet.lerpVectors(this.previous, this.position, alpha)
+    this.renderFeet.y -= HALF_HEIGHT
+    this.mesh.position.copy(this.renderFeet)
+
+    // Rotation douce vers la direction de déplacement (par le plus court chemin).
+    const current = this.mesh.rotation.y
+    const delta = Math.atan2(Math.sin(this.facing - current), Math.cos(this.facing - current))
+    this.mesh.rotation.y = current + delta * Math.min(1, frameDt * P.turnSpeed)
+  }
+
+  /** Place instantanément les pieds à `feetY` (ex : sol posé sous le joueur). */
+  liftFeetTo(feetY: number) {
+    this.position.y = feetY + HALF_HEIGHT
+    this.previous.y = this.position.y
+    this.velocity.y = Math.max(0, this.velocity.y)
+    this.body.setNextKinematicTranslation(this.position)
+  }
+
+  respawn() {
+    this.position.set(this.spawn.x, this.spawn.y + HALF_HEIGHT, this.spawn.z)
+    this.previous.copy(this.position)
+    this.velocity.set(0, 0, 0)
+  }
+
+  /** Vitesse horizontale voulue, relative à l'orientation de la visée. */
+  private computeWishVelocity(cmd: PlayerCommand) {
+    const sin = Math.sin(cmd.yaw)
+    const cos = Math.cos(cmd.yaw)
+    this.wish.set(-sin * cmd.forward + cos * cmd.right, 0, -cos * cmd.forward - sin * cmd.right)
+    if (this.wish.lengthSq() > 1) this.wish.normalize()
+    const speed = cmd.sprint && cmd.forward > 0 ? P.sprintSpeed : P.walkSpeed
+    this.wish.multiplyScalar(speed)
+  }
+
+  private integrateVelocity(cmd: PlayerCommand, dt: number) {
+    if (this.grounded) {
+      this.velocity.x = this.wish.x
+      this.velocity.z = this.wish.z
+      this.velocity.y = cmd.jump ? P.jumpVelocity : P.groundStickVelocity
+      return
+    }
+    const k = Math.min(1, P.airControl * dt * AIR_CONTROL_RATE)
+    this.velocity.x += (this.wish.x - this.velocity.x) * k
+    this.velocity.z += (this.wish.z - this.velocity.z) * k
+    this.velocity.y += CONFIG.world.gravity * dt
+  }
+
+  private move(dt: number) {
+    const desired = this.desired
+    desired.x = this.velocity.x * dt
+    desired.y = this.velocity.y * dt
+    desired.z = this.velocity.z * dt
+
+    this.controller.computeColliderMovement(this.collider, desired)
+    let move = this.controller.computedMovement()
+
+    // En montée, Rapier projette le mouvement sur la pente : à 45° on perdrait
+    // ~50 % de vitesse horizontale. On recalcule avec un déplacement agrandi
+    // pour garder la même vitesse au sol qu'à plat (comme dans les jeux du genre).
+    const wanted = Math.hypot(desired.x, desired.z)
+    const got = Math.hypot(move.x, move.z)
+    if (this.grounded && move.y > SLOPE_EPSILON && got > SLOPE_EPSILON && got < wanted * SLOPE_MIN_RATIO) {
+      const k = Math.min(wanted / got, P.maxSlopeBoost)
+      desired.x *= k
+      desired.z *= k
+      this.controller.computeColliderMovement(this.collider, desired)
+      move = this.controller.computedMovement()
+    }
+
+    this.grounded = this.controller.computedGrounded()
+    // Plafond touché : on annule la vitesse verticale.
+    if (this.velocity.y > 0 && move.y < desired.y * 0.5) this.velocity.y = 0
+
+    this.position.x += move.x
+    this.position.y += move.y
+    this.position.z += move.z
+  }
 }

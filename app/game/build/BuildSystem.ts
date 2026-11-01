@@ -1,156 +1,154 @@
 import * as THREE from 'three/webgpu'
-import type RAPIER from '@dimforge/rapier3d-compat'
 import { CONFIG } from '../config'
-import {
-  computePlacement,
-  rampSurfaceY,
-  type PieceSpec,
-  type PieceType,
-  type Viewer,
-} from './BuildGrid'
-
-type Rapier = typeof RAPIER
+import type { RAPIER, RapierModule } from '../physics/rapier'
+import { createPlankTexture } from '../world/textures'
+import { computePlacement, walkableSurfaceY, type PieceSpec, type PieceType, type Viewer } from './BuildGrid'
 
 interface Piece {
-  spec: PieceSpec
-  mesh: THREE.Mesh
-  collider: RAPIER.Collider
+  readonly spec: PieceSpec
+  readonly mesh: THREE.Mesh
+  readonly collider: RAPIER.Collider
   hp: number
 }
 
-const PIECE_HP: Record<PieceType, number> = { wall: 150, floor: 140, ramp: 140 }
+export interface BuildPreview {
+  readonly spec: PieceSpec
+  readonly valid: boolean
+}
+
+const PIECE_COLORS: Record<PieceType, string> = {
+  wall: '#e0b07a',
+  floor: '#d39a5c',
+  ramp: '#c98d4f',
+}
+const GHOST_VALID = '#4fc3ff'
+const GHOST_INVALID = '#ff4f5e'
+const GHOST_OPACITY = 0.35
+/** Le fantôme est dessiné après les objets opaques. */
+const GHOST_RENDER_ORDER = 10
 
 /**
- * Gère la pose, l'aperçu ("ghost") et la destruction des constructions.
- * Chaque pièce = un mesh + un collider Rapier fixe.
+ * Pose, aperçu ("fantôme") et destruction des constructions.
+ * Chaque pièce = un mesh (cube unitaire mis à l'échelle) + un collider Rapier fixe.
  */
 export class BuildSystem {
   private readonly pieces = new Map<string, Piece>()
   private readonly byCollider = new Map<number, Piece>()
-  private readonly box: THREE.BoxGeometry
+  private readonly box = new THREE.BoxGeometry(1, 1, 1)
+  private readonly texture = createPlankTexture()
   private readonly materials: Record<PieceType, THREE.MeshStandardMaterial>
+  private readonly ghostMaterial: THREE.MeshBasicMaterial
   private readonly ghost: THREE.Mesh
-  private readonly ghostMat: THREE.MeshBasicMaterial
-
-  /** Pièce actuellement visée (aperçu). */
-  preview: PieceSpec | null = null
-  previewValid = false
+  private readonly ray: RAPIER.Ray
+  private _preview: BuildPreview | null = null
 
   constructor(
     private readonly scene: THREE.Scene,
-    private readonly rapier: Rapier,
+    private readonly rapier: RapierModule,
     private readonly physics: RAPIER.World,
   ) {
-    // Un cube unitaire partagé, mis à l'échelle par pièce (les dimensions viennent du PieceSpec).
-    this.box = new THREE.BoxGeometry(1, 1, 1)
+    const material = (type: PieceType) =>
+      new THREE.MeshStandardMaterial({ map: this.texture, color: PIECE_COLORS[type], roughness: 0.85 })
+    this.materials = { wall: material('wall'), floor: material('floor'), ramp: material('ramp') }
 
-    const wood = plankTexture()
-    this.materials = {
-      wall: new THREE.MeshStandardMaterial({ map: wood, color: '#e0b07a', roughness: 0.85 }),
-      floor: new THREE.MeshStandardMaterial({ map: wood, color: '#d39a5c', roughness: 0.85 }),
-      ramp: new THREE.MeshStandardMaterial({ map: wood, color: '#c98d4f', roughness: 0.85 }),
-    }
-
-    this.ghostMat = new THREE.MeshBasicMaterial({
-      color: '#4fc3ff',
+    this.ghostMaterial = new THREE.MeshBasicMaterial({
+      color: GHOST_VALID,
       transparent: true,
-      opacity: 0.35,
+      opacity: GHOST_OPACITY,
       depthWrite: false,
     })
-    this.ghost = new THREE.Mesh(this.box, this.ghostMat)
+    this.ghost = new THREE.Mesh(this.box, this.ghostMaterial)
     this.ghost.visible = false
-    this.ghost.renderOrder = 10
+    this.ghost.renderOrder = GHOST_RENDER_ORDER
     scene.add(this.ghost)
+
+    this.ray = new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 })
   }
 
-  get count() {
+  get pieceCount() {
     return this.pieces.size
   }
 
-  /** Met à jour l'aperçu de la pièce à poser. `type = null` cache l'aperçu. */
-  updatePreview(type: PieceType | null, viewer: Viewer, player: { pos: THREE.Vector3 }) {
+  get preview(): BuildPreview | null {
+    return this._preview
+  }
+
+  /** Recalcule l'aperçu. `type = null` le masque (aucune pièce sélectionnée). */
+  updatePreview(type: PieceType | null, viewer: Viewer, playerFeet: THREE.Vector3) {
     if (!type) {
-      this.preview = null
-      this.ghost.visible = false
+      this.setPreview(null)
       return
     }
     const spec = computePlacement(type, viewer, (cx, level, cz) => this.pieces.get(`ramp:${cx}:${level}:${cz}`)?.spec)
-    this.preview = spec
-    this.previewValid = this.canPlace(spec, player.pos)
-
-    applyTransform(this.ghost, spec)
-    this.ghost.visible = true
-    this.ghostMat.color.set(this.previewValid ? '#4fc3ff' : '#ff4f5e')
+    this.setPreview({ spec, valid: this.canPlace(spec, playerFeet) })
   }
 
-  /** Pose la pièce en aperçu. Renvoie la pièce posée, ou null. */
+  /** Pose la pièce de l'aperçu si l'emplacement est valide. */
   placePreview(): PieceSpec | null {
-    const spec = this.preview
-    if (!spec || !this.previewValid) return null
-    this.place(spec)
-    this.previewValid = false
-    this.ghostMat.color.set('#ff4f5e')
-    return spec
+    const preview = this._preview
+    if (!preview?.valid) return null
+    this.place(preview.spec)
+    this.setPreview({ spec: preview.spec, valid: false })
+    return preview.spec
   }
 
   place(spec: PieceSpec) {
     if (this.pieces.has(spec.key)) return
     const mesh = new THREE.Mesh(this.box, this.materials[spec.type])
     applyTransform(mesh, spec)
-    mesh.castShadow = mesh.receiveShadow = true
+    mesh.castShadow = true
+    mesh.receiveShadow = true
     this.scene.add(mesh)
 
-    const q = mesh.quaternion
+    const { x, y, z, w } = mesh.quaternion
     const body = this.physics.createRigidBody(
-      this.rapier.RigidBodyDesc.fixed()
-        .setTranslation(spec.x, spec.y, spec.z)
-        .setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }),
+      this.rapier.RigidBodyDesc.fixed().setTranslation(spec.x, spec.y, spec.z).setRotation({ x, y, z, w }),
     )
     const collider = this.physics.createCollider(
       this.rapier.ColliderDesc.cuboid(spec.sx / 2, spec.sy / 2, spec.sz / 2),
       body,
     )
 
-    const piece: Piece = { spec, mesh, collider, hp: PIECE_HP[spec.type] }
+    const piece: Piece = { spec, mesh, collider, hp: CONFIG.build.hp[spec.type] }
     this.pieces.set(spec.key, piece)
     this.byCollider.set(collider.handle, piece)
   }
 
-  /** Détruit la pièce visée par un rayon. Renvoie true si une pièce a été détruite. */
-  destroyAt(origin: THREE.Vector3, dir: THREE.Vector3, maxDist: number, ignore: RAPIER.Collider) {
-    const hit = this.physics.castRay(new this.rapier.Ray(origin, dir), maxDist, true, undefined, undefined, ignore)
-    if (!hit) return false
-    const piece = this.byCollider.get(hit.collider.handle)
+  /** Détruit la pièce touchée par le rayon. Renvoie `true` si une pièce a été détruite. */
+  destroyAlongRay(origin: THREE.Vector3, dir: THREE.Vector3, maxDistance: number, ignore: RAPIER.Collider) {
+    this.ray.origin = origin
+    this.ray.dir = dir
+    const hit = this.physics.castRay(this.ray, maxDistance, true, undefined, undefined, ignore)
+    const piece = hit && this.byCollider.get(hit.collider.handle)
     if (!piece) return false
     this.remove(piece)
     return true
   }
 
-  clear() {
-    for (const p of [...this.pieces.values()]) this.remove(p)
+  /** Surface praticable de `spec` sous le point (x, z), ou `null`. */
+  surfaceUnder(spec: PieceSpec, x: number, z: number) {
+    return walkableSurfaceY(spec, x, z)
   }
 
-  /**
-   * Après la pose d'un sol / d'une rampe sous le joueur, on le remonte au-dessus
-   * pour qu'il ne se retrouve pas coincé dans la pièce.
-   */
-  surfaceUnder(spec: PieceSpec, x: number, z: number) {
-    const half = CONFIG.build.tile / 2
-    if (Math.abs(x - spec.x) > half || Math.abs(z - spec.z) > half) return null
-    if (spec.type === 'floor') return spec.y + spec.sy / 2
-    if (spec.type === 'ramp') return rampSurfaceY(spec, x, z) + spec.sy
-    return null
+  clear() {
+    for (const piece of [...this.pieces.values()]) this.remove(piece)
   }
 
   dispose() {
     this.clear()
     this.scene.remove(this.ghost)
     this.box.dispose()
-    Object.values(this.materials).forEach((m) => {
-      m.map?.dispose()
-      m.dispose()
-    })
-    this.ghostMat.dispose()
+    this.texture.dispose()
+    for (const material of Object.values(this.materials)) material.dispose()
+    this.ghostMaterial.dispose()
+  }
+
+  private setPreview(preview: BuildPreview | null) {
+    this._preview = preview
+    this.ghost.visible = preview !== null
+    if (!preview) return
+    applyTransform(this.ghost, preview.spec)
+    this.ghostMaterial.color.set(preview.valid ? GHOST_VALID : GHOST_INVALID)
   }
 
   private remove(piece: Piece) {
@@ -161,52 +159,26 @@ export class BuildSystem {
     this.pieces.delete(piece.spec.key)
   }
 
-  private canPlace(spec: PieceSpec, playerPos: THREE.Vector3) {
-    if (this.pieces.has(spec.key)) return false
+  private canPlace(spec: PieceSpec, playerFeet: THREE.Vector3) {
+    if (this.pieces.has(spec.key) || spec.level < 0) return false
     const limit = CONFIG.world.halfSize
-    if (Math.abs(spec.x) > limit || Math.abs(spec.z) > limit || spec.level < 0) return false
-
-    // Interdit de poser un mur À TRAVERS le joueur.
-    if (spec.type === 'wall') {
-      const r = CONFIG.player.radius + spec.sx / 2
-      const rz = CONFIG.player.radius + spec.sz / 2
-      const footY = playerPos.y - CONFIG.player.height / 2
-      const overlapsY = footY < spec.y + spec.sy / 2 && footY + CONFIG.player.height > spec.y - spec.sy / 2
-      if (overlapsY && Math.abs(playerPos.x - spec.x) < r && Math.abs(playerPos.z - spec.z) < rz) return false
-    }
-    return true
+    if (Math.abs(spec.x) > limit || Math.abs(spec.z) > limit) return false
+    // Un mur ne peut pas traverser le joueur (sols et rampes le remontent dessus).
+    return spec.type !== 'wall' || !wallOverlapsPlayer(spec, playerFeet)
   }
+}
+
+/** Test boîte (mur) contre boîte englobante du joueur. */
+function wallOverlapsPlayer(spec: PieceSpec, feet: THREE.Vector3) {
+  const { radius, height } = CONFIG.player
+  const overlapX = Math.abs(feet.x - spec.x) < radius + spec.sx / 2
+  const overlapZ = Math.abs(feet.z - spec.z) < radius + spec.sz / 2
+  const overlapY = feet.y < spec.y + spec.sy / 2 && feet.y + height > spec.y - spec.sy / 2
+  return overlapX && overlapY && overlapZ
 }
 
 function applyTransform(mesh: THREE.Mesh, spec: PieceSpec) {
   mesh.position.set(spec.x, spec.y, spec.z)
   mesh.scale.set(spec.sx, spec.sy, spec.sz)
   mesh.rotation.set(spec.pitch, spec.yaw, 0, 'YXZ')
-  mesh.updateMatrix()
-}
-
-/** Texture de planches générée procéduralement. */
-function plankTexture() {
-  const c = document.createElement('canvas')
-  c.width = c.height = 256
-  const g = c.getContext('2d')!
-  g.fillStyle = '#f0d2a8'
-  g.fillRect(0, 0, 256, 256)
-  for (let i = 0; i < 4; i++) {
-    const y = i * 64
-    g.fillStyle = i % 2 ? '#e7c391' : '#f3d7ad'
-    g.fillRect(0, y, 256, 64)
-    g.fillStyle = 'rgba(90, 50, 20, 0.35)'
-    g.fillRect(0, y, 256, 3)
-    for (let k = 0; k < 18; k++) {
-      g.fillStyle = 'rgba(120, 70, 30, 0.08)'
-      g.fillRect(Math.random() * 256, y + 6 + Math.random() * 54, 40 + Math.random() * 80, 2)
-    }
-  }
-  g.strokeStyle = 'rgba(60, 30, 10, 0.5)'
-  g.lineWidth = 8
-  g.strokeRect(0, 0, 256, 256)
-  const tex = new THREE.CanvasTexture(c)
-  tex.colorSpace = THREE.SRGBColorSpace
-  return tex
 }

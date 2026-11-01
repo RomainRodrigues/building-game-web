@@ -1,15 +1,15 @@
 /**
- * Logique PURE de la grille de construction (aucune dépendance à Three.js ni
- * Rapier) : elle pourra être partagée telle quelle avec un serveur.
+ * Logique PURE de la grille de construction : aucune dépendance à Three.js ni
+ * à Rapier. Elle est testée unitairement et pourra être partagée avec un serveur.
  *
- * Le monde est découpé en cases de `tile` x `tile` mètres, et en étages de
- * `height` mètres. Il existe trois types de pièces :
+ * Le monde est découpé en cases de `tile` x `tile` mètres et en étages de
+ * `height` mètres. Trois types de pièces :
  *
- *  - floor : une dalle horizontale qui couvre une case, posée à la base d'un étage.
- *  - wall  : un mur vertical posé sur une ARÊTE entre deux cases.
- *  - ramp  : une rampe à 45° qui couvre une case et monte d'un étage.
+ *  - floor : dalle horizontale couvrant une case, à la base d'un étage ;
+ *  - wall  : mur vertical posé sur une ARÊTE entre deux cases ;
+ *  - ramp  : rampe à 45° couvrant une case et montant d'un étage.
  *
- * Directions (comme le "yaw" de la caméra) :
+ * Directions (alignées sur le "yaw" de la caméra) :
  *   0 = nord (-Z), 1 = ouest (-X), 2 = sud (+Z), 3 = est (+X)
  */
 import { CONFIG } from '../config'
@@ -17,33 +17,58 @@ import { CONFIG } from '../config'
 export type PieceType = 'wall' | 'floor' | 'ramp'
 export type Dir = 0 | 1 | 2 | 3
 
-export const PIECE_TYPES: PieceType[] = ['wall', 'floor', 'ramp']
+export const PIECE_TYPES: readonly PieceType[] = ['wall', 'floor', 'ramp']
 
+/** Description complète (et sérialisable) d'une pièce posée sur la grille. */
 export interface PieceSpec {
   type: PieceType
-  /** Identifiant unique de l'emplacement : deux pièces ne peuvent pas avoir le même. */
+  /** Identifiant de l'emplacement : deux pièces ne peuvent pas partager la même clé. */
   key: string
-  /** Centre de la pièce (monde). */
+  /** Centre de la pièce (repère monde). */
   x: number
   y: number
   z: number
-  /** Dimensions de la boîte AVANT rotation de la rampe. */
+  /** Dimensions de la boîte avant rotation. */
   sx: number
   sy: number
   sz: number
-  /** Rotation : inclinaison (rampe) puis orientation. */
+  /** Inclinaison autour de X (rampe), appliquée avant `yaw`. */
   pitch: number
+  /** Orientation autour de Y. */
   yaw: number
   level: number
   dir: Dir
 }
 
+/** Position et regard du joueur, seules données nécessaires au placement. */
+export interface Viewer {
+  x: number
+  z: number
+  feetY: number
+  yaw: number
+  pitch: number
+}
+
+export type RampLookup = (cx: number, level: number, cz: number) => PieceSpec | undefined
+
 const T = CONFIG.build.tile
 const H = CONFIG.build.height
 const TH = CONFIG.build.thickness
+const QUARTER_TURN = Math.PI / 2
 
-/** Vecteur (x, z) unitaire pour chaque direction. */
-export const DIR_VEC: Record<Dir, [number, number]> = {
+/** Marge pour qu'un joueur posé sur un sol soit compté à l'étage de ce sol. */
+const LEVEL_TOLERANCE = 0.3
+/** Distance (en cases) du point "devant le joueur" servant à choisir la case cible. */
+const LOOK_AHEAD_TILES = 0.6
+/** Hauteur au-dessus de la base d'une rampe à partir de laquelle on est "dessus". */
+const ON_RAMP_MIN_HEIGHT = 0.2
+/** Seuils d'inclinaison du regard (radians). */
+const PITCH_WALL_UP = 0.75
+const PITCH_FLOOR_UP = 0.5
+const PITCH_FLOOR_DOWN = -0.7
+
+/** Vecteur (x, z) unitaire de chaque direction. */
+export const DIR_VEC: Readonly<Record<Dir, readonly [number, number]>> = {
   0: [0, -1],
   1: [-1, 0],
   2: [0, 1],
@@ -51,7 +76,8 @@ export const DIR_VEC: Record<Dir, [number, number]> = {
 }
 
 export function yawToDir(yaw: number): Dir {
-  return ((((Math.round(yaw / (Math.PI / 2)) % 4) + 4) % 4) as Dir)
+  const quarter = Math.round(yaw / QUARTER_TURN)
+  return (((quarter % 4) + 4) % 4) as Dir
 }
 
 export function cellOf(x: number, z: number): [number, number] {
@@ -59,7 +85,7 @@ export function cellOf(x: number, z: number): [number, number] {
 }
 
 export function levelOf(feetY: number) {
-  return Math.floor((feetY + 0.3) / H)
+  return Math.floor((feetY + LEVEL_TOLERANCE) / H)
 }
 
 export function floorSpec(cx: number, level: number, cz: number): PieceSpec {
@@ -79,11 +105,14 @@ export function floorSpec(cx: number, level: number, cz: number): PieceSpec {
   }
 }
 
-/** Mur sur le côté `dir` de la case (cx, cz). Les deux cases voisines partagent la même clé. */
+/**
+ * Mur sur le côté `dir` de la case (cx, cz). Deux cases voisines partagent
+ * l'arête, donc la même clé : impossible de doubler un mur.
+ */
 export function wallSpec(cx: number, level: number, cz: number, dir: Dir): PieceSpec {
   const y = level * H + H / 2
   if (dir === 1 || dir === 3) {
-    // Mur perpendiculaire à X, sur la frontière x = bx * T
+    // Mur perpendiculaire à X, sur la frontière x = bx * T.
     const bx = dir === 1 ? cx : cx + 1
     return {
       type: 'wall',
@@ -100,6 +129,7 @@ export function wallSpec(cx: number, level: number, cz: number, dir: Dir): Piece
       dir,
     }
   }
+  // Mur perpendiculaire à Z, sur la frontière z = bz * T.
   const bz = dir === 0 ? cz : cz + 1
   return {
     type: 'wall',
@@ -117,7 +147,7 @@ export function wallSpec(cx: number, level: number, cz: number, dir: Dir): Piece
   }
 }
 
-/** Rampe qui monte vers la direction `dir`. Une seule rampe par case et par étage. */
+/** Rampe montant vers la direction `dir`. Une seule rampe par case et par étage. */
 export function rampSpec(cx: number, level: number, cz: number, dir: Dir): PieceSpec {
   return {
     type: 'ramp',
@@ -128,54 +158,50 @@ export function rampSpec(cx: number, level: number, cz: number, dir: Dir): Piece
     sx: T,
     sy: TH,
     sz: Math.hypot(T, H),
-    // Inclinaison autour de X (monte vers -Z), puis rotation vers `dir`.
+    // Inclinée autour de X (monte vers -Z), puis tournée vers `dir`.
     pitch: Math.atan2(H, T),
-    yaw: dir * (Math.PI / 2),
+    yaw: dir * QUARTER_TURN,
     level,
     dir,
   }
 }
 
-/** Hauteur de la surface d'une rampe au point (x, z). */
-export function rampSurfaceY(spec: PieceSpec, x: number, z: number) {
+/** Hauteur de la ligne médiane d'une rampe au point (x, z). */
+export function rampMidlineY(spec: PieceSpec, x: number, z: number) {
   const [dx, dz] = DIR_VEC[spec.dir]
-  // Progression le long de la rampe : -T/2 (bas) .. +T/2 (haut)
+  // Progression le long de la rampe : -T/2 (bas) .. +T/2 (haut).
   const along = (x - spec.x) * dx + (z - spec.z) * dz
   return spec.level * H + (along / T + 0.5) * H
 }
 
-export interface Viewer {
-  x: number
-  z: number
-  feetY: number
-  yaw: number
-  pitch: number
+/**
+ * Hauteur de la surface praticable d'un sol / d'une rampe au point (x, z),
+ * ou `null` si le point n'est pas au-dessus de la pièce (ou si c'est un mur).
+ */
+export function walkableSurfaceY(spec: PieceSpec, x: number, z: number): number | null {
+  const half = T / 2
+  if (Math.abs(x - spec.x) > half || Math.abs(z - spec.z) > half) return null
+  if (spec.type === 'floor') return spec.y + spec.sy / 2
+  if (spec.type === 'ramp') return rampMidlineY(spec, x, z) + spec.sy
+  return null
 }
 
 /**
- * Choisit l'emplacement de la pièce à poser à partir de la position et du
- * regard du joueur (règles simples, inspirées des jeux du genre).
- * `rampAt` permet de savoir si le joueur est déjà sur une rampe, pour
- * enchaîner les rampes vers le haut ("ramp rush").
+ * Choisit l'emplacement de la pièce à poser selon la position et le regard
+ * du joueur. `rampAt` permet de savoir si le joueur est sur une rampe, pour
+ * enchaîner les pièces vers le haut ("ramp rush").
  */
-export function computePlacement(
-  type: PieceType,
-  v: Viewer,
-  rampAt: (cx: number, level: number, cz: number) => PieceSpec | undefined,
-): PieceSpec {
-  const dir = yawToDir(v.yaw)
+export function computePlacement(type: PieceType, viewer: Viewer, rampAt: RampLookup): PieceSpec {
+  const dir = yawToDir(viewer.yaw)
   const [fx, fz] = DIR_VEC[dir]
-  const [cx, cz] = cellOf(v.x, v.z)
-  const level = levelOf(v.feetY)
+  const [cx, cz] = cellOf(viewer.x, viewer.z)
+  const level = levelOf(viewer.feetY)
 
-  // Case "devant" : celle qui contient un point situé un peu devant le joueur.
-  const [ax, az] = cellOf(v.x + fx * T * 0.6, v.z + fz * T * 0.6)
-  // Si on est sur une rampe qui monte dans le même sens, la suivante est un étage au-dessus.
   const currentRamp = rampAt(cx, level, cz)
-  const onRampSameDir = !!currentRamp && currentRamp.dir === dir && v.feetY > level * H + 0.2
-
-  if (onRampSameDir) {
-    // "Ramp rush" : la pièce suivante va dans la case suivante, un étage plus haut.
+  const climbing = currentRamp?.dir === dir && viewer.feetY > level * H + ON_RAMP_MIN_HEIGHT
+  if (climbing) {
+    // Sur une rampe qui monte dans le sens du regard : la pièce suivante va
+    // dans la case suivante, un étage plus haut.
     const nx = cx + fx
     const nz = cz + fz
     if (type === 'ramp') return rampSpec(nx, level + 1, nz, dir)
@@ -183,12 +209,15 @@ export function computePlacement(
     return wallSpec(nx, level + 1, nz, dir)
   }
 
+  // Case "devant" : celle qui contient un point situé un peu devant le joueur.
+  const [ax, az] = cellOf(viewer.x + fx * T * LOOK_AHEAD_TILES, viewer.z + fz * T * LOOK_AHEAD_TILES)
+
   switch (type) {
     case 'wall':
-      return wallSpec(cx, v.pitch > 0.75 ? level + 1 : level, cz, dir)
+      return wallSpec(cx, viewer.pitch > PITCH_WALL_UP ? level + 1 : level, cz, dir)
     case 'floor':
-      if (v.pitch < -0.7) return floorSpec(cx, level, cz) // sous ses pieds
-      if (v.pitch > 0.5) return floorSpec(cx, level + 1, cz) // au-dessus de la tête
+      if (viewer.pitch < PITCH_FLOOR_DOWN) return floorSpec(cx, level, cz)
+      if (viewer.pitch > PITCH_FLOOR_UP) return floorSpec(cx, level + 1, cz)
       return floorSpec(ax, level, az)
     case 'ramp':
       return rampSpec(ax, level, az, dir)
