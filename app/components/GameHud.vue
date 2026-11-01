@@ -26,8 +26,19 @@ const paused = computed(() => !props.hud.locked)
     />
 
     <div
+      v-if="!paused && hud.editing"
+      class="edit-banner"
+      :class="{ invalid: !hud.editValid }"
+    >
+      <strong>Édition</strong>
+      <span v-if="hud.editValid">Clic : sélectionner les tuiles · G : valider · Clic droit : réinitialiser</span>
+      <span v-else>Édition impossible : il doit rester une partie de la pièce</span>
+    </div>
+
+    <div
       v-if="!paused"
       class="hotbar"
+      :class="{ dimmed: hud.editing }"
     >
       <div
         v-for="s in slots"
@@ -64,6 +75,10 @@ const paused = computed(() => !props.hud.locked)
           <li><b>Souris</b> viser · <b>Clic gauche</b> construire (maintenir = turbo)</li>
           <li><b>1 / 2 / 3 / 4</b> ou <b>molette</b> : mur / sol / rampe / toit · <b>X</b> ranger</li>
           <li><b>Clic droit</b> détruire la pièce visée · <b>Échap</b> pause</li>
+          <li>
+            <b>G</b> éditer la pièce visée, puis <b>clic</b> (maintenu pour glisser) sur les tuiles
+            à retirer · <b>G</b> valider · <b>clic droit</b> réinitialiser
+          </li>
           <li class="hint">
             La pièce se pose là où vise le réticule (case et étage). Elle doit être
             reliée au sol, sinon elle ne peut pas être posée.
@@ -121,6 +136,29 @@ const paused = computed(() => !props.hud.locked)
   border-radius: 8px;
   font-size: 13px;
 }
+.hotbar.dimmed {
+  opacity: 0.35;
+}
+
+.edit-banner {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 16px;
+  font-size: 14px;
+  background: var(--panel);
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+}
+
+.edit-banner.invalid {
+  border-color: #ff4f5e;
+}
+
 .slot.active {
   border-color: var(--accent);
   box-shadow: 0 0 12px rgba(79, 195, 255, 0.5);

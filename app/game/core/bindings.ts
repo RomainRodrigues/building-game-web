@@ -17,6 +17,7 @@ export const BINDINGS = {
   selectFloor: ['Digit2'],
   selectRamp: ['Digit3'],
   selectRoof: ['Digit4'],
+  edit: ['KeyG'],
 } as const satisfies Record<string, readonly string[]>
 
 export type Action = keyof typeof BINDINGS

@@ -86,6 +86,8 @@ export const CONFIG = {
      * moins d'une case, pour qu'en regardant devant soi la pièce arrive juste devant.
      */
     aimReach: 4.5,
+    /** Portée pour entrer en édition sur une pièce, depuis la tête du joueur. */
+    editReach: 6,
     /** Portée max pour détruire une pièce, depuis le joueur. */
     editRange: 12,
     hp: { wall: 150, floor: 140, ramp: 140, roof: 140 },

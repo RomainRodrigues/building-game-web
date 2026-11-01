@@ -10,6 +10,8 @@ ainsi que les tests associés.
 | Appuis et effondrements | `app/game/build/Structure.ts` | `tests/unit/Structure.spec.ts` |
 | Rendu, collisions, visée, pose / destruction | `app/game/build/BuildSystem.ts` | navigateur (voir `CLAUDE.md`) |
 | Orchestration (touches, turbo, remontée du joueur) | `app/game/Game.ts` | navigateur |
+| Édition : grilles, sélections valides, formes | `app/game/build/Edit.ts` | `tests/unit/Edit.spec.ts` |
+| Édition : mode édition, sélection, affichage | `app/game/build/EditSystem.ts` | navigateur |
 | Valeurs réglables | `app/game/config.ts` (section `build`) | |
 
 ## 1. La grille
@@ -172,9 +174,62 @@ Ce que cela donne :
 - **Destruction** : clic droit sur une pièce visée, jusqu'à 12 m du joueur
   (`build.editRange`). Les pièces qui ne tiennent plus s'effondrent (section 6).
 
-## 8. Limites connues et évolutions prévues
+## 8. Édition des pièces (`Edit.ts`, `EditSystem.ts`)
 
-- Pas d'édition de pièces (portes, fenêtres) ni de matériaux (bois / pierre / métal).
+L'édition suit la convention du genre : **on retire des tuiles d'une pièce** pour y ouvrir
+une porte, une fenêtre, un passage… Les tuiles retirées n'ont plus ni rendu ni collision :
+on passe à travers.
+
+### 8.1 Les grilles d'édition
+
+Chaque pièce éditable est découpée en tuiles. Une tuile est repérée par son indice
+`ligne × colonnes + colonne`, la ligne 0 étant en bas (mur) ou côté -Z local (sol, rampe).
+
+| Pièce | Grille | Taille d'une tuile |
+|---|---|---|
+| Mur | 3 × 3 | 1,67 m × 1,33 m |
+| Sol | 2 × 2 | 2,5 m × 2,5 m |
+| Rampe | 2 × 2 (2 colonnes en largeur, 2 lignes le long de la pente) | 2,5 m × moitié de la pente |
+| Toit | non éditable pour l'instant | |
+
+### 8.2 Contrôles
+
+| Action | Touche | Effet |
+|---|---|---|
+| Entrer en édition | **G** en visant une pièce à 6 m au plus de la tête (`build.editReach`) | La grille de la pièce s'affiche. Les tuiles déjà retirées apparaissent sélectionnées. |
+| Sélectionner | **Clic gauche**, maintenu pour glisser | La première tuile cliquée bascule (sélectionnée / désélectionnée), et toutes les tuiles survolées pendant le glisser prennent le même état. |
+| Valider | **G** | Les tuiles sélectionnées sont retirées, les autres restaurées. Une sélection invalide est abandonnée : la pièce reste inchangée. |
+| Réinitialiser | **Clic droit** | La pièce retrouve sa forme complète et l'édition se termine. |
+| Annuler | **Échap**, ou s'éloigner au-delà de la portée, ou pièce détruite | L'édition se termine sans rien changer. |
+
+Pendant l'édition, la construction et la destruction sont suspendues. Le joueur peut
+toujours se déplacer et viser.
+
+### 8.3 Sélections valides
+
+Une sélection invalide s'affiche en **rouge** et ne peut pas être validée.
+
+| Pièce | Règle | Exemples |
+|---|---|---|
+| Mur | Au moins une tuile doit rester. | Fenêtre : tuile du milieu. Porte : tuile du milieu + celle du dessous. Arche : les 3 tuiles du bas + celle du milieu. Demi-mur : les 6 tuiles du haut. |
+| Sol | Au moins une tuile doit rester. | Ouverture d'un quart (1 tuile), d'une moitié (2 tuiles côte à côte), en diagonale (2 tuiles opposées). |
+| Rampe | Seule une **colonne entière** peut être retirée, ce qui donne une demi-rampe. | Demi-rampe gauche ou droite. |
+
+### 8.4 Ce que l'édition ne change pas
+
+- **L'emplacement** : une pièce éditée occupe toujours son emplacement. On ne peut pas
+  construire dans le trou d'un mur édité.
+- **Les appuis** : une pièce éditée garde les mêmes jointures que la pièce complète
+  (section 6). Une simplification à revoir si besoin.
+- **La destruction** : une pièce éditée se détruit comme les autres.
+
+## 9. Limites connues et évolutions prévues
+
+- Pas de matériaux (bois / pierre / métal).
+- Édition : pas de formes en triangle (demi-arche), pas d'édition des toits, pas de
+  rotation d'une rampe par glisser, pas de validation au relâchement de la touche.
+- On peut éditer toutes les pièces (pas encore de notion de propriétaire : en multijoueur,
+  seules ses propres pièces et celles de ses alliés seraient éditables).
 - Les points de vie existent mais rien ne les fait baisser (pas encore d'armes).
 - Les effondrements sont instantanés, sans animation.
 - Les rampes sont limitées aux 4 directions, et les murs ne peuvent pas être posés en

@@ -20,6 +20,7 @@ Puis ouvrir http://localhost:3000 → **Free Build** → cliquer pour verrouille
 | Choisir mur / sol / rampe / toit | 1 / 2 / 3 / 4 ou molette |
 | Ranger les pièces | X |
 | Détruire la pièce visée | Clic droit |
+| Éditer la pièce visée (portes, fenêtres…) | G, puis clic sur les tuiles à retirer, G pour valider, clic droit pour réinitialiser |
 | Pause | Échap |
 
 Astuce : la pièce se pose là où vise le réticule. Vise le sol pour poser au sol, vise plus
@@ -69,6 +70,8 @@ app/
     player/                 joueur (Rapier), caméra 3e personne, avatar
     build/BuildGrid.ts      règles de la grille (PURES, testées, partageables avec un serveur)
     build/Structure.ts      intégrité structurelle : appuis et effondrements (PURE, testée)
+    build/Edit.ts           édition : grilles de tuiles, sélections valides (PURE, testée)
+    build/EditSystem.ts     mode édition : sélection, validation, affichage de la grille
     build/BuildSystem.ts    aperçu, pose, destruction des pièces
     utils/random.ts         aléatoire déterministe (carte identique à chaque partie)
 tests/unit/                 tests Vitest de la logique pure
@@ -96,7 +99,8 @@ En dev, le jeu est accessible dans la console via `window.__game`.
 - [x] Phase 3 (base) : mur / sol / rampe sur grille, aperçu, turbo build, destruction
 - [x] Intégrité structurelle : pièces obligatoirement reliées au sol, effondrements
 - [x] Toit en pyramide
-- [ ] Édition de pièces, matériaux (bois / pierre / métal) et PV visibles
+- [x] Édition de pièces (murs, sols, demi-rampes)
+- [ ] Matériaux (bois / pierre / métal) et PV visibles
 - [ ] Armes (hitscan), cibles d'entraînement, bot simple
 - [ ] Vrai modèle animé (glTF + Mixamo), sons, particules
 - [ ] Passer à `@dimforge/rapier3d` (vrai fichier `.wasm`, ~30 % plus léger que la version base64)

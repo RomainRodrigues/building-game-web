@@ -8,6 +8,7 @@ import { World } from './world/World'
 import { Player, type PlayerCommand } from './player/Player'
 import { ThirdPersonCamera } from './player/ThirdPersonCamera'
 import { BuildSystem } from './build/BuildSystem'
+import { EditSystem } from './build/EditSystem'
 import { liftHeightAfterPlacing, PIECE_TYPES, type PieceSpec, type PieceType } from './build/BuildGrid'
 import type { HudState } from './hud'
 
@@ -43,6 +44,7 @@ export class Game {
   private readonly player: Player
   private readonly cam: ThirdPersonCamera
   private readonly build: BuildSystem
+  private readonly edit: EditSystem
   private readonly resizeObserver: ResizeObserver
   private readonly aim = new THREE.Vector3()
   private readonly feet = new THREE.Vector3()
@@ -80,9 +82,14 @@ export class Game {
     this.player = new Player(this.scene, RAPIER, this.physics, SPAWN)
     this.cam = new ThirdPersonCamera(RAPIER, this.physics, this.player.collider)
     this.build = new BuildSystem(this.scene, RAPIER, this.physics)
+    this.edit = new EditSystem(this.scene, this.build)
 
     this.input = new Input(renderer.domElement)
-    this.input.onLockChange = () => this.emitHud()
+    this.input.onLockChange = (locked) => {
+      // Mettre le jeu en pause (Échap) annule l'édition en cours.
+      if (!locked) this.edit.cancel()
+      this.emitHud()
+    }
 
     this.resizeObserver = new ResizeObserver(() => this.resize())
     this.resizeObserver.observe(container)
@@ -112,6 +119,7 @@ export class Game {
   }
 
   clearBuilds() {
+    this.edit.cancel()
     this.build.clear()
     this.emitHud()
   }
@@ -120,6 +128,7 @@ export class Game {
     this.loop.stop()
     this.resizeObserver.disconnect()
     this.input.dispose()
+    this.edit.dispose()
     this.build.dispose()
     this.world.dispose()
     this.physics.free()
@@ -131,11 +140,16 @@ export class Game {
 
   private update(dt: number) {
     const frame = this.input.pollFrame()
-    this.updateSelection(frame)
 
     this.player.update(this.readCommand(), dt)
     this.physics.step()
 
+    if (this.edit.active) {
+      this.updateEditing(frame)
+      return
+    }
+    this.updateSelection(frame)
+    if (frame.pressed.has('edit') && this.beginEdit()) return
     this.updateBuilding(frame, dt)
   }
 
@@ -166,7 +180,7 @@ export class Game {
 
   private updateBuilding({ pressed }: InputFrame, dt: number) {
     const feet = this.feet.set(this.player.position.x, this.player.feetY, this.player.position.z)
-    this.build.updatePreview(this.piece, { feet, yaw: this.cam.yaw, target: this.aimTarget(feet) })
+    this.build.updatePreview(this.piece, { feet, yaw: this.cam.yaw, target: this.aimTarget() })
 
     // Clic = une pièce ; clic maintenu = une pièce toutes les `turboDelay` secondes.
     this.turboCooldown -= dt
@@ -189,15 +203,64 @@ export class Game {
     }
   }
 
+  /** Entre en édition sur la pièce visée, à portée. Renvoie `true` si c'est le cas. */
+  private beginEdit() {
+    const piece = this.build.pieceAlongRay(
+      this.cam.camera.position,
+      this.cam.forward(this.aim),
+      this.reachFromCamera(CONFIG.build.editReach),
+      this.player.collider,
+    )
+    if (!piece || !this.edit.begin(piece)) return false
+    this.build.hidePreview()
+    this.emitHud()
+    return true
+  }
+
+  /** Mode édition : sélection, validation (G), réinitialisation (clic droit), annulation. */
+  private updateEditing({ pressed }: InputFrame) {
+    const key = this.edit.pieceKey
+    const piece = key ? this.build.getPiece(key) : null
+    const tooFar = piece && this.headPosition().distanceTo(piece.object.position) > CONFIG.build.editReach + CONFIG.build.tile
+
+    if (!piece || tooFar) this.edit.cancel()
+    else if (pressed.has('edit')) this.edit.confirm()
+    else if (pressed.has('destroy')) this.edit.reset()
+    else if ([...pressed].some((action) => PIECE_SELECTION[action])) {
+      // Choisir une pièce à construire quitte l'édition (sans la valider).
+      this.edit.cancel()
+      this.updateSelection({ pressed, wheel: 0 })
+    }
+    else {
+      this.edit.update(
+        this.cam.camera.position,
+        this.cam.forward(this.aim),
+        this.reachFromCamera(CONFIG.build.editReach),
+        pressed.has('place'),
+        this.input.isHeld('place'),
+      )
+    }
+    if (!this.edit.active) this.emitHud()
+  }
+
+  /** Distance depuis la caméra correspondant à une portée `reach` au-delà de la tête du joueur. */
+  private reachFromCamera(reach: number) {
+    return this.cam.camera.position.distanceTo(this.headPosition()) + reach
+  }
+
+  /** Position de la tête (pivot de la caméra), dans un vecteur réutilisé. */
+  private headPosition() {
+    const { x, z } = this.player.position
+    return this.aimHead.set(x, this.player.feetY + CONFIG.camera.pivotHeight, z)
+  }
+
   /**
    * Point visé au réticule. La caméra étant derrière le joueur, le rayon part de
    * la caméra et s'arrête à `aimReach` au-delà de la tête.
    */
-  private aimTarget(feet: THREE.Vector3) {
-    const camera = this.cam.camera.position
-    const head = this.aimHead.set(feet.x, feet.y + CONFIG.camera.pivotHeight, feet.z)
-    const maxDistance = camera.distanceTo(head) + CONFIG.build.aimReach
-    return this.build.aimTarget(camera, this.cam.forward(this.aim), maxDistance, this.player.collider, this.aimPoint)
+  private aimTarget() {
+    const maxDistance = this.reachFromCamera(CONFIG.build.aimReach)
+    return this.build.aimTarget(this.cam.camera.position, this.cam.forward(this.aim), maxDistance, this.player.collider, this.aimPoint)
   }
 
   /** Un sol / une rampe posé à travers le joueur le remonte dessus au lieu de le bloquer. */
@@ -237,6 +300,8 @@ export class Game {
       locked: this.input.locked,
       piece: this.piece,
       pieces: this.build.pieceCount,
+      editing: this.edit.active,
+      editValid: this.edit.valid,
       fps: this.fps,
       speed: Math.round(this.player.horizontalSpeed * 10) / 10,
       backend: this.backend,

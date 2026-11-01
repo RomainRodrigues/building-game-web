@@ -27,7 +27,7 @@ pnpm build        # build de production
 ## Documentation
 
 - `docs/construction.md` : référence du système de construction (grille, emplacements,
-  placement au réticule, appuis, effondrements). **Toute modification des règles de
+  placement au réticule, appuis, effondrements, édition). **Toute modification des règles de
   construction doit mettre ce document à jour**, dans le même commit que le code et les tests.
 
 ## Architecture
@@ -37,7 +37,7 @@ pnpm build        # build de production
 - `app/components/GameCanvas.client.vue` : seul pont Vue <-> moteur. Crée le `Game`,
   l'expose au HUD et appelle `dispose()` au démontage.
 - `app/game/hud.ts` : contrat `HudState`, le SEUL état réactif côté Vue.
-- `app/game/build/BuildGrid.ts`, `build/Structure.ts`, `core/Loop.ts`, `utils/random.ts` : logique pure,
+- `app/game/build/BuildGrid.ts`, `build/Structure.ts`, `build/Edit.ts`, `core/Loop.ts`, `utils/random.ts` : logique pure,
   sans Three.js ni Rapier, couverte par les tests unitaires.
 - Stack : Nuxt 4, Three.js `WebGPURenderer` (import depuis `three/webgpu`, avec fallback
   WebGL2 automatique), Rapier `@dimforge/rapier3d-compat`.
