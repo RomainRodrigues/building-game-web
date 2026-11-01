@@ -23,7 +23,11 @@ export const PIECE_TYPES: readonly PieceType[] = ['wall', 'floor', 'ramp', 'roof
 /** Description complète (et sérialisable) d'une pièce posée sur la grille. */
 export interface PieceSpec {
   type: PieceType
-  /** Identifiant de l'emplacement : deux pièces ne peuvent pas partager la même clé. */
+  /**
+   * Emplacement occupé (voir `docs/construction.md`) : deux pièces ne peuvent pas
+   * partager la même clé. Rampe et toit occupent le même emplacement (le volume
+   * de la case), donc ne peuvent pas coexister dans une case à un même étage.
+   */
   key: string
   /** Centre de la pièce (repère monde). */
   x: number
@@ -104,6 +108,11 @@ export function levelOf(feetY: number) {
   return Math.floor((feetY + LEVEL_TOLERANCE) / H)
 }
 
+/** Emplacement "volume" d'une case à un étage, partagé par les rampes et les toits. */
+function volumeKey(cx: number, level: number, cz: number) {
+  return `volume:${cx}:${level}:${cz}`
+}
+
 export function floorSpec(cx: number, level: number, cz: number): PieceSpec {
   return {
     type: 'floor',
@@ -163,11 +172,11 @@ export function wallSpec(cx: number, level: number, cz: number, dir: Dir): Piece
   }
 }
 
-/** Rampe montant vers la direction `dir`. Une seule rampe par case et par étage. */
+/** Rampe montant vers la direction `dir`. Une seule rampe ou un seul toit par case et par étage. */
 export function rampSpec(cx: number, level: number, cz: number, dir: Dir): PieceSpec {
   return {
     type: 'ramp',
-    key: `ramp:${cx}:${level}:${cz}`,
+    key: volumeKey(cx, level, cz),
     x: cx * T + T / 2,
     y: level * H + H / 2,
     z: cz * T + T / 2,
@@ -201,12 +210,12 @@ export function liftHeightAfterPlacing(
 
 /**
  * Toit en pyramide sur la case (cx, cz), base à la hauteur de l'étage `level`.
- * Il peut coexister avec un sol dans la même case (clés distinctes).
+ * Il peut coexister avec un sol dans la même case, mais pas avec une rampe.
  */
 export function roofSpec(cx: number, level: number, cz: number): PieceSpec {
   return {
     type: 'roof',
-    key: `roof:${cx}:${level}:${cz}`,
+    key: volumeKey(cx, level, cz),
     x: cx * T + T / 2,
     y: level * H + ROOF_H / 2,
     z: cz * T + T / 2,
@@ -278,7 +287,7 @@ export function computePlacement(type: PieceType, aim: BuildAim, lookup: PieceLo
     case 'ramp': {
       const target = rampSpec(cx, level(surfaceLevel(aim.target.y)), cz, dir)
       const existing = lookup(target.key)
-      if (existing?.dir !== dir) return target
+      if (existing?.type !== 'ramp' || existing.dir !== dir) return target
       // Une rampe montant dans le même sens est déjà là : on la prolonge.
       const [fx, fz] = DIR_VEC[dir]
       return rampSpec(cx + fx, target.level + 1, cz + fz, dir)

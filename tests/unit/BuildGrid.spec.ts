@@ -110,6 +110,13 @@ describe('walkableSurfaceY', () => {
 })
 
 describe('roofSpec', () => {
+  it('occupe le même emplacement qu\'une rampe (volume de la case)', () => {
+    for (const dir of [0, 1, 2, 3] as const) {
+      expect(roofSpec(0, 1, 0).key).toBe(rampSpec(0, 1, 0, dir).key)
+    }
+    expect(roofSpec(0, 1, 0).key).not.toBe(rampSpec(0, 0, 0, 0).key)
+  })
+
   it('pose la base au sommet de l\'étage et a une clé distincte du sol', () => {
     const roof = roofSpec(0, 1, 0)
     expect(roof.y - roof.sy / 2).toBeCloseTo(H)
@@ -183,6 +190,11 @@ describe('computePlacement', () => {
       // Le rayon touche le mur (z = 0) et le point visé est ramené du côté du joueur.
       const spec = computePlacement('ramp', aim({ x: 2.5, y: 1.5, z: 0.05 }), world(wallSpec(0, 0, 0, 0)))
       expect(spec.key).toBe(rampSpec(0, 0, 0, 0).key)
+    })
+
+    it('ne prolonge pas un toit : l\'emplacement est occupé', () => {
+      const roof = roofSpec(0, 0, -1)
+      expect(computePlacement('ramp', aim({ x: 2.5, y: 0.8, z: -2.5 }), world(roof)).key).toBe(roof.key)
     })
 
     it('prolonge une rampe déjà présente dans le même sens', () => {
