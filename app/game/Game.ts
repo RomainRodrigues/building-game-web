@@ -8,7 +8,7 @@ import { World } from './world/World'
 import { Player, type PlayerCommand } from './player/Player'
 import { ThirdPersonCamera } from './player/ThirdPersonCamera'
 import { BuildSystem } from './build/BuildSystem'
-import { PIECE_TYPES, type PieceType } from './build/BuildGrid'
+import { PIECE_TYPES, type PieceSpec, type PieceType } from './build/BuildGrid'
 import type { HudState } from './hud'
 
 export type { HudState } from './hud'
@@ -183,7 +183,7 @@ export class Game {
       const placed = this.build.placePreview()
       if (placed) {
         this.turboCooldown = CONFIG.build.turboDelay
-        this.liftPlayerOnto(this.build.surfaceUnder(placed, feet.x, feet.z))
+        this.liftPlayerOnto(placed)
       }
     }
 
@@ -197,11 +197,14 @@ export class Game {
     }
   }
 
-  /** Un sol / une rampe posé "dans" le joueur le remonte dessus au lieu de le bloquer. */
-  private liftPlayerOnto(surfaceY: number | null) {
+  /** Un sol / une rampe posé sur le joueur le remonte dessus au lieu de le bloquer. */
+  private liftPlayerOnto(piece: PieceSpec) {
+    if (piece.type === 'wall') return
+    const { x, z } = this.player.position
+    const surfaceY = this.build.surfaceUnder(piece, x, z)
     if (surfaceY === null) return
     const feetY = this.player.feetY
-    if (feetY < surfaceY && feetY > surfaceY - CONFIG.build.maxLiftHeight) {
+    if (feetY < surfaceY && feetY > surfaceY - CONFIG.build.maxLiftHeight[piece.type]) {
       this.player.liftFeetTo(surfaceY + LIFT_CLEARANCE)
     }
   }
